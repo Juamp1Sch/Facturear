@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  name      String
+  email     String    @unique
+  passwordHash String? @map("password_hash")
+  invoices  Invoice[]
+  createdAt DateTime  @default(now()) @map("created_at")
+}
+
+model Invoice {
+  id                  String             @id @default(cuid())
+  userId              String             @map("user_id")
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFileUrl     String             @map("original_file_url")
+  originalFileKey     String             @map("original_file_key")
+  mimeType            String             @map("mime_type")
+  rawOcrText          String?            @map("raw_ocr_text") @db.Text
+  providerName        String?            @map("provider_name")
+  providerCuit        String?            @map("provider_cuit")
+  invoiceNumber       String?            @map("invoice_number")
+  invoiceType         String?            @map("invoice_type")
+  invoiceDate         DateTime?          @map("invoice_date")
+  netAmount           Decimal?           @map("net_amount") @db.Decimal(14, 2)
+  vatAmount           Decimal?           @map("vat_amount") @db.Decimal(14, 2)
+  totalAmount         Decimal?           @map("total_amount") @db.Decimal(14, 2)
+  accountingAccountId String?            @map("accounting_account_id")
+  accountingAccount   AccountingAccount? @relation(fields: [accountingAccountId], references: [id])
+  status              InvoiceStatus      @default(PROCESSING)
+  aiConfidence        Float?             @map("ai_confidence")
+  aiPayload           Json?              @map("ai_payload")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  corrections         Correction[]
+}
+
+model AccountingAccount {
+  id       String    @id @default(cuid())
+  code     String    @unique
+  name     String
+  type     String
+  invoices Invoice[]
+}
+
+model Correction {
+  id             String   @id @default(cuid())
+  invoiceId      String   @map("invoice_id")
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  field          String
+  previousValue  String?  @map("previous_value") @db.Text
+  correctedValue String   @map("corrected_value") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+}
+
+enum InvoiceStatus {
+  PROCESSING
+  READY
+  ERROR
+  CORRECTED
+}
