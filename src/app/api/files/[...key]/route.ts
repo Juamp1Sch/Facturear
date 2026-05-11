@@ -3,6 +3,8 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
+import { auth } from "@/auth";
+
 const ROOT = path.join(process.cwd(), ".data", "uploads");
 
 function contentTypeForKey(key: string): string {
@@ -17,9 +19,19 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ key: string[] }> },
 ) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
   const { key: segments } = await ctx.params;
   const joined = segments?.join("/") ?? "";
   const key = decodeURIComponent(joined);
+
+  const allowedPrefix = `invoices/${session.user.id}/`;
+  if (!key.startsWith(allowedPrefix)) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
 
   const resolved = path.resolve(ROOT, key);
   const rootResolved = path.resolve(ROOT);

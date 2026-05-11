@@ -2,8 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const DEFAULT_USER_EMAIL = "demo@facturear.local";
-
 const ACCOUNTS = [
   { code: "6110", name: "Servicios de Telecomunicaciones", type: "Gasto" },
   { code: "6120", name: "Servicios de Energía Eléctrica", type: "Gasto" },
@@ -15,13 +13,8 @@ const ACCOUNTS = [
 ];
 
 async function main() {
-  await prisma.user.upsert({
-    where: { email: DEFAULT_USER_EMAIL },
-    update: { name: "Demo User" },
-    create: {
-      email: DEFAULT_USER_EMAIL,
-      name: "Demo User",
-    },
+  await prisma.user.deleteMany({
+    where: { email: "demo@facturear.local" },
   });
 
   for (const acc of ACCOUNTS) {
@@ -32,7 +25,7 @@ async function main() {
     });
   }
 
-  console.log("Seed completed: demo user + accounting accounts.");
+  console.log("Seed completed: accounting accounts (users register via /registrarse).");
 }
 
 main()

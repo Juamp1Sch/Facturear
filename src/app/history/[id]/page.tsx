@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
+import { auth } from "@/auth";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { InvoiceDetail } from "@/components/invoice-detail";
 import { prisma } from "@/lib/db";
@@ -27,11 +28,16 @@ export default async function InvoiceDetailPage({
     );
   }
 
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
   const { id } = await params;
   const query = await searchParams;
 
-  const invoice = await prisma.invoice.findUnique({
-    where: { id },
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, userId: session.user.id },
     include: { accountingAccount: true },
   });
 

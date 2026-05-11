@@ -10,6 +10,7 @@
 - Storage: **Amazon S3** when `AWS_*` env vars are set; otherwise **local disk** (`.data/uploads/`) with `/api/files/...` for previews.
 - Images: **OpenAI vision** (multimodal) for structured extraction; PDFs: **`pdf-parse`** for embedded text, then the same **OpenAI** structured output (Zod).
 - Database: **PostgreSQL** + **Prisma** (`User`, `Invoice`, `AccountingAccount`, `Correction`).
+- Auth: **Auth.js / NextAuth v5** (credentials + JWT); each user only sees their own invoices.
 - UI: **Next.js** (App Router) + **Tailwind CSS v4** + **shadcn/ui**.
 
 ### Stack
@@ -33,7 +34,7 @@
 
 ```bash
 cp .env.example .env
-# Edit .env with your DATABASE_URL, OPENAI_API_KEY, etc.
+# Edit .env: DATABASE_URL, OPENAI_API_KEY, AUTH_SECRET (e.g. npx auth secret), AUTH_TRUST_HOST=true for local dev
 
 npm install
 npx prisma db push
@@ -41,7 +42,7 @@ npm run db:seed
 npm run dev
 ```
 
-Open [http://localhost:3000/upload](http://localhost:3000/upload).
+Open [http://localhost:3000/](http://localhost:3000/) (landing), register at `/registrarse`, then use **Upload** at `/upload`.
 
 ### Scripts
 
@@ -51,13 +52,14 @@ Open [http://localhost:3000/upload](http://localhost:3000/upload).
 | `npm run build`      | Production build           |
 | `npm run start`      | Start production server    |
 | `npm run db:push`    | Sync Prisma schema to DB   |
-| `npm run db:seed`    | Seed demo user + accounts |
+| `npm run db:seed`    | Seed accounting accounts + remove legacy demo user |
 | `npm run db:migrate` | Create migrations (dev)    |
 
 ### Project layout
 
 - `prisma/schema.prisma` — data model  
-- `prisma/seed.ts` — demo user + default accounting accounts  
+- `prisma/seed.ts` — default accounting accounts  
+- `src/auth.ts` — Auth.js config; `src/proxy.ts` — route protection  
 - `src/actions/invoices.ts` — `uploadInvoice` server action (pipeline)  
 - `src/lib/` — db, storage, PDF text, AI, Zod schemas  
 - `src/app/upload` — upload UI  
@@ -66,7 +68,6 @@ Open [http://localhost:3000/upload](http://localhost:3000/upload).
 
 ### Roadmap
 
-- Auth.js (multi-user)
 - Manual corrections + `Correction` audit trail
 - Dashboard (VAT, spend by vendor)
 - Excel / CSV export
@@ -86,6 +87,7 @@ Open [http://localhost:3000/upload](http://localhost:3000/upload).
 - Fotos: **OpenAI visión** (multimodal); PDFs: **`pdf-parse`** si hay texto embebido, luego la misma **OpenAI** con salida estructurada (Zod).
 - IA: **OpenAI** con salida estructurada (Zod).
 - Base de datos: **PostgreSQL** + **Prisma**.
+- Cuentas: **Auth.js** (email/contraseña); historial y facturas por usuario.
 
 ### Requisitos
 
@@ -98,7 +100,7 @@ Open [http://localhost:3000/upload](http://localhost:3000/upload).
 
 ```bash
 cp .env.example .env
-# Completá DATABASE_URL, OPENAI_API_KEY, etc.
+# Completá DATABASE_URL, OPENAI_API_KEY, AUTH_SECRET (p. ej. npx auth secret), AUTH_TRUST_HOST=true en local
 
 npm install
 npx prisma db push
@@ -106,16 +108,15 @@ npm run db:seed
 npm run dev
 ```
 
-Entrá a [http://localhost:3000/upload](http://localhost:3000/upload).
+Entrá a [http://localhost:3000/](http://localhost:3000/), registrate en `/registrarse` y luego cargá facturas en `/upload`.
 
 ### Notas
 
-- El usuario por defecto del seed es `demo@facturear.local` (configurable con `DEFAULT_USER_EMAIL`).
+- Necesitás `AUTH_SECRET` en `.env` (ver `.env.example`). `npm run db:seed` elimina el usuario legacy `demo@facturear.local` si existía.
 - Los PDF **escaneados** (solo imagen, sin texto seleccionable) no aportan texto útil: conviene subirlos como **JPEG/PNG** para que la visión de OpenAI los lea, o usar un PDF con texto embebido.
 
 ### Próximos pasos (roadmap)
 
-- Autenticación (Auth.js)
 - Edición manual y registro de correcciones
 - Panel y reportes
 - Exportación Excel/CSV
