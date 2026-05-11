@@ -37,9 +37,6 @@ yarn-error.log*
 # local uploads (when not using S3)
 .data/
 
-# Google Cloud Vision service account (never commit)
-google-vision-key.json
-
 # vercel
 .vercel
 

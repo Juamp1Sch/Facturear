@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 
-import { extractInvoiceData } from "@/lib/ai";
+import {
+  extractInvoiceData,
+  extractInvoiceDataFromImage,
+} from "@/lib/ai";
+import type { InvoiceExtraction } from "@/lib/schemas";
 import { getDefaultUserId } from "@/lib/default-user";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { prisma } from "@/lib/db";
@@ -101,8 +105,19 @@ export async function uploadInvoice(formData: FormData) {
   });
 
   try {
-    const rawOcrText = await runOcr(buffer, mimeType);
-    const extracted = await extractInvoiceData(rawOcrText);
+    let rawOcrText: string | null = null;
+    let extracted: InvoiceExtraction;
+
+    if (mimeType === "application/pdf") {
+      rawOcrText = await runOcr(buffer, mimeType);
+      extracted = await extractInvoiceData(rawOcrText);
+    } else {
+      extracted = await extractInvoiceDataFromImage(
+        buffer,
+        mimeType as "image/jpeg" | "image/png",
+      );
+    }
+
     const account = await resolveAccountingAccount(extracted.accounting_account);
 
     await prisma.invoice.update({
