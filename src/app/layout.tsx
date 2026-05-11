@@ -19,7 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Facturear — Facturas de proveedores",
   description:
-    "Subí facturas (PDF o foto), OCR con Google Vision, extracción con OpenAI e historial.",
+    "Subí facturas (PDF o foto): visión OpenAI en fotos, texto en PDF y extracción con IA.",
 };
 
 export default function RootLayout({

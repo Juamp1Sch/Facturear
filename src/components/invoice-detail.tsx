@@ -101,7 +101,7 @@ export function InvoiceDetail({
           <CardHeader>
             <CardTitle>Datos extraídos</CardTitle>
             <CardDescription>
-              OCR + IA. Revisá los valores antes de usarlos en contabilidad.
+              Extracción con IA (visión en imágenes, texto del PDF si aplica). Revisá los valores antes de usarlos en contabilidad.
             </CardDescription>
           </CardHeader>
           <CardContent>

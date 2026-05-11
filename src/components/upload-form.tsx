@@ -30,7 +30,8 @@ function PendingHint() {
   if (!pending) return null;
   return (
     <p className="text-sm text-muted-foreground">
-      Subiendo archivo → OCR / lectura de PDF → extracción con IA… Esto puede
+      Subiendo archivo → lectura de PDF o visión en imagen → extracción con IA…
+      Esto puede
       tardar unos segundos.
     </p>
   );
