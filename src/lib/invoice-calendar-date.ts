@@ -18,6 +18,19 @@ export function parseAiInvoiceDate(iso: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Valor para `<input type="date">` (día calendario en UTC, coherente con `parseAiInvoiceDate`). */
+export function invoiceDateToInputValue(
+  value: string | Date | null | undefined,
+): string {
+  if (value == null) return "";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function formatInvoiceCalendarDate(
   value: string | Date | null | undefined,
 ): string {

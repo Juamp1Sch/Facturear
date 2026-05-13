@@ -3,7 +3,7 @@
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Prisma } from "@prisma/client";
+import { Prisma, type InvoiceStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
 import {
@@ -12,7 +12,10 @@ import {
 } from "@/lib/ai";
 import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
-import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
+import {
+  normalizeArgentineCuitFromAiOrNull,
+  validateArgentineCuitForEntry,
+} from "@/lib/cuit-argentina";
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { prisma } from "@/lib/db";
 import { runOcr } from "@/lib/ocr";
@@ -190,7 +193,7 @@ export async function uploadInvoice(formData: FormData) {
     }
 
     const account = await resolveAccountingAccount(extracted.accounting_account);
-    const providerCuit = normalizeArgentineCuitOrNull(extracted.cuit);
+    const providerCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
 
     await prisma.invoice.update({
       where: { id: invoice.id },
@@ -236,4 +239,150 @@ export async function uploadInvoice(formData: FormData) {
   revalidatePath("/history");
   revalidatePath(`/history/${invoice.id}`);
   redirect(`/history/${invoice.id}`);
+}
+
+export type UpdateInvoiceFieldsResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+function formText(
+  value: FormDataEntryValue | null | undefined,
+): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") return null;
+  const t = value.trim();
+  return t.length > 0 ? t : null;
+}
+
+/**
+ * Acepta punto o coma decimal y separadores de miles (punto estilo AR).
+ * Vacío → null.
+ */
+function parseMoneyFromForm(
+  value: FormDataEntryValue | null | undefined,
+): Prisma.Decimal | null {
+  const raw = formText(value);
+  if (!raw) return null;
+  const compact = raw.replace(/\s/g, "");
+  let normalized: string;
+  if (compact.includes(",")) {
+    normalized = compact.replace(/\./g, "").replace(",", ".");
+  } else {
+    normalized = compact;
+  }
+  const n = Number(normalized);
+  if (Number.isNaN(n)) {
+    throw new Error("MONTO_INVALIDO");
+  }
+  return new Prisma.Decimal(n);
+}
+
+export async function updateInvoiceExtractedFields(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  if (!invoiceId) {
+    return { ok: false, error: "Falta el identificador de la factura." };
+  }
+
+  const existing = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId: session.user.id },
+  });
+  if (!existing) {
+    return { ok: false, error: "No se encontró la factura." };
+  }
+  if (existing.status === "PROCESSING") {
+    return { ok: false, error: "La factura sigue procesándose." };
+  }
+
+  const providerName = formText(formData.get("providerName"));
+  const cuitRaw = formData.get("providerCuit");
+  const cuitStr = typeof cuitRaw === "string" ? cuitRaw : "";
+  const cuitValidation = validateArgentineCuitForEntry(cuitStr, {
+    requireVerifier: false,
+  });
+  if (!cuitValidation.ok) {
+    return { ok: false, error: cuitValidation.message };
+  }
+  const providerCuit = cuitValidation.normalized;
+
+  const invoiceDateRaw = formText(formData.get("invoiceDate"));
+  let invoiceDate: Date | null = null;
+  if (invoiceDateRaw) {
+    invoiceDate = parseAiInvoiceDate(invoiceDateRaw);
+    if (!invoiceDate) {
+      return {
+        ok: false,
+        error: "La fecha no es válida. Usá el formato AAAA-MM-DD.",
+      };
+    }
+  }
+
+  const invoiceNumber = formText(formData.get("invoiceNumber"));
+  const invoiceType = formText(formData.get("invoiceType"));
+
+  let netAmount: Prisma.Decimal | null;
+  let vatAmount: Prisma.Decimal | null;
+  let totalAmount: Prisma.Decimal | null;
+  try {
+    netAmount = parseMoneyFromForm(formData.get("netAmount"));
+    vatAmount = parseMoneyFromForm(formData.get("vatAmount"));
+    totalAmount = parseMoneyFromForm(formData.get("totalAmount"));
+  } catch (e) {
+    if (e instanceof Error && e.message === "MONTO_INVALIDO") {
+      return {
+        ok: false,
+        error: "Revisá los importes: usá números (ej. 1234,56 o 1234.56).",
+      };
+    }
+    throw e;
+  }
+
+  const accountingName = formText(formData.get("accountingAccountName"));
+  let accountingAccountId: string | null = null;
+  try {
+    const acc = await resolveAccountingAccount(accountingName);
+    accountingAccountId = acc?.id ?? null;
+  } catch {
+    return {
+      ok: false,
+      error: "No se pudo guardar la cuenta contable. Probá de nuevo.",
+    };
+  }
+
+  const nextStatus: InvoiceStatus =
+    existing.status === "ERROR"
+      ? "READY"
+      : existing.status === "READY"
+        ? "CORRECTED"
+        : existing.status;
+
+  await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      providerName,
+      providerCuit,
+      invoiceNumber,
+      invoiceType,
+      invoiceDate,
+      netAmount,
+      vatAmount,
+      totalAmount,
+      accountingAccountId,
+      status: nextStatus,
+    },
+  });
+
+  revalidatePath("/history");
+  revalidatePath(`/history/${invoiceId}`);
+  return { ok: true };
 }

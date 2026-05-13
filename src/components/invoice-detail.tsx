@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { InvoiceExtractedFields } from "@/components/invoice-extracted-fields";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -8,16 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
-import { formatMoney } from "@/lib/format-money";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
 function isErrorPayload(
@@ -44,8 +35,6 @@ export function InvoiceDetail({
     showErrorBanner && isErrorPayload(invoice.aiPayload)
       ? invoice.aiPayload.error
       : null;
-
-  const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
 
   return (
     <div className="space-y-6">
@@ -96,68 +85,7 @@ export function InvoiceDetail({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Datos extraídos</CardTitle>
-            <CardDescription>
-              Extracción con IA (visión en imágenes, texto del PDF si aplica). Revisá los valores antes de usarlos en contabilidad.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Campo</TableHead>
-                  <TableHead>Valor</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Proveedor</TableCell>
-                  <TableCell>{invoice.providerName ?? "—"}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>CUIT</TableCell>
-                  <TableCell>{invoice.providerCuit ?? "—"}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Fecha</TableCell>
-                  <TableCell>{dateStr}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Nº comprobante</TableCell>
-                  <TableCell>{invoice.invoiceNumber ?? "—"}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Tipo</TableCell>
-                  <TableCell>{invoice.invoiceType ?? "—"}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Neto</TableCell>
-                  <TableCell>{formatMoney(invoice.netAmount)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>IVA</TableCell>
-                  <TableCell>{formatMoney(invoice.vatAmount)}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Total</TableCell>
-                  <TableCell className="font-medium">
-                    {formatMoney(invoice.totalAmount)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Cuenta contable</TableCell>
-                  <TableCell>
-                    {invoice.accountingAccount
-                      ? `${invoice.accountingAccount.code} — ${invoice.accountingAccount.name}`
-                      : "—"}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <InvoiceExtractedFields invoice={invoice} />
       </div>
 
       <Card>
