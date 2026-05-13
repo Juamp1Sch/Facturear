@@ -1,3 +1,6 @@
+import { redirect } from "next/navigation";
+
+import { auth } from "@/auth";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { HistoryList } from "@/components/history-list";
 import { prisma } from "@/lib/db";
@@ -18,7 +21,13 @@ export default async function HistoryPage() {
     );
   }
 
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
   const rows = await prisma.invoice.findMany({
+    where: { userId: session.user.id },
     orderBy: { createdAt: "desc" },
     include: { accountingAccount: true },
     take: 200,

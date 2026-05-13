@@ -57,8 +57,23 @@ export function UploadForm() {
     onDrop,
     accept: {
       "application/pdf": [".pdf"],
-      "image/jpeg": [".jpg", ".jpeg"],
+      "image/jpeg": [".jpg", ".jpeg", ".jpe"],
       "image/png": [".png"],
+    },
+    validator: (file) => {
+      const name = file.name.toLowerCase();
+      const byExt = /\.(pdf|jpe?g|png)$/i.test(name);
+      const t = (file.type || "").toLowerCase();
+      const okType =
+        !t ||
+        t === "application/pdf" ||
+        t === "image/jpeg" ||
+        t === "image/jpg" ||
+        t === "image/pjpeg" ||
+        t === "image/png" ||
+        t === "application/octet-stream";
+      if (byExt && okType) return null;
+      return { code: "file-invalid-type", message: "Solo PDF, JPG o PNG." };
     },
     maxFiles: 1,
     maxSize: 10 * 1024 * 1024,
@@ -76,7 +91,7 @@ export function UploadForm() {
       <CardHeader>
         <CardTitle>Subir factura</CardTitle>
         <CardDescription>
-          PDF o imagen (foto / escaneo). Máximo 10 MB.
+          PDF o imagen JPG / PNG (foto / escaneo). Si el JPEG no sube, revisá que la extensión sea .jpg o .jpeg. Máximo 10 MB.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

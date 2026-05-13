@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
@@ -44,9 +45,7 @@ export function InvoiceDetail({
       ? invoice.aiPayload.error
       : null;
 
-  const dateStr = invoice.invoiceDate
-    ? new Date(invoice.invoiceDate).toLocaleDateString("es-AR")
-    : "—";
+  const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
 
   return (
     <div className="space-y-6">

@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import type { SerializedInvoiceListItem } from "@/types/invoice";
 
@@ -28,9 +29,7 @@ function statusVariant(
 
 export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem }) {
   const title = invoice.providerName?.trim() || "Proveedor desconocido";
-  const dateStr = invoice.invoiceDate
-    ? new Date(invoice.invoiceDate).toLocaleDateString("es-AR")
-    : "—";
+  const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
 
   return (
     <Link href={`/history/${invoice.id}`}>

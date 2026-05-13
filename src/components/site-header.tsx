@@ -1,34 +1,51 @@
 import Link from "next/link";
 
-export function SiteHeader() {
+import { auth } from "@/auth";
+import { SiteHeaderNavLoggedIn } from "@/components/site-header-nav-logged-in";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export async function SiteHeader() {
+  const session = await auth();
+  const loggedIn = Boolean(session?.user?.id);
+
   return (
     <header className="border-b border-border bg-muted/40">
-      <div className="mx-auto flex max-w-5xl items-center gap-8 px-4 py-3">
+      <div className="mx-auto grid max-w-5xl grid-cols-3 items-center gap-2 px-4 py-3 sm:gap-4">
+        <div className="min-w-0" aria-hidden="true" />
+
         <Link
-          href="/upload"
-          className="flex items-center gap-2 text-lg font-semibold tracking-tight text-brand-subsection"
+          href={loggedIn ? "/upload" : "/"}
+          className="flex items-center justify-center gap-2 justify-self-center text-lg font-semibold tracking-tight text-brand-subsection"
         >
           <span
-            className="flex size-8 items-center justify-center rounded-lg bg-brand-logo text-sm font-bold text-white shadow-sm"
+            className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-brand-logo text-sm font-bold text-white shadow-sm"
             aria-hidden
           >
             F
           </span>
-          Facturear
+          <span className="truncate">Facturear</span>
         </Link>
-        <nav className="flex gap-2 text-sm sm:gap-3">
-          <Link
-            href="/upload"
-            className="rounded-full bg-brand-pill/35 px-3 py-1.5 font-medium text-brand-subsection transition-colors hover:bg-brand-pill/55 hover:text-brand-subsection"
-          >
-            Subir factura
-          </Link>
-          <Link
-            href="/history"
-            className="rounded-full px-3 py-1.5 font-medium text-muted-foreground transition-colors hover:bg-brand-section/15 hover:text-brand-subsection"
-          >
-            Historial
-          </Link>
+
+        <nav className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          {loggedIn ? (
+            <SiteHeaderNavLoggedIn />
+          ) : (
+            <>
+              <Link
+                href="/iniciar-sesion"
+                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              >
+                Iniciar sesión
+              </Link>
+              <Link
+                href="/registrarse"
+                className={cn(buttonVariants({ variant: "default", size: "sm" }))}
+              >
+                Registrarse
+              </Link>
+            </>
+          )}
         </nav>
       </div>
     </header>

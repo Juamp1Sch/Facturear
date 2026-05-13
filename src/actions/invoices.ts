@@ -5,19 +5,81 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 
+import { auth } from "@/auth";
 import {
   extractInvoiceData,
   extractInvoiceDataFromImage,
 } from "@/lib/ai";
 import type { InvoiceExtraction } from "@/lib/schemas";
-import { getDefaultUserId } from "@/lib/default-user";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
+import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { prisma } from "@/lib/db";
 import { runOcr } from "@/lib/ocr";
+import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+/** Menos que esto suele ser PDF escaneado o solo metadatos; pasamos a visión en la 1.ª página. */
+const MIN_PDF_TEXT_CHARS = 32;
+
+function pdfEmbeddedTextIsWeak(text: string): boolean {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length < MIN_PDF_TEXT_CHARS;
+}
+
+/** Some cameras / OS report empty type, `image/jpg`, or `application/octet-stream` for JPEG. */
+function normalizeDeclaredMime(raw: string): string {
+  const t = raw.trim().toLowerCase();
+  if (t === "image/jpg" || t === "image/pjpeg" || t === "image/x-citrix-jpeg") {
+    return "image/jpeg";
+  }
+  return t;
+}
+
+function mimeFromFileName(name: string): string | null {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".jpe")) {
+    return "image/jpeg";
+  }
+  if (lower.endsWith(".png")) return "image/png";
+  return null;
+}
+
+function sniffMimeFromBuffer(buffer: Buffer): string | null {
+  if (buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return "application/pdf";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  return null;
+}
+
+function resolveInvoiceMimeType(file: File, buffer: Buffer): string | null {
+  const declared = normalizeDeclaredMime(file.type || "");
+  if (ALLOWED.has(declared)) return declared;
+  const sniffed = sniffMimeFromBuffer(buffer);
+  if (sniffed && ALLOWED.has(sniffed)) return sniffed;
+  const loose = !declared || declared === "application/octet-stream";
+  if (loose) {
+    const fromName = mimeFromFileName(file.name);
+    if (fromName && ALLOWED.has(fromName)) return fromName;
+  }
+  return null;
+}
 
 function extForMime(mime: string): string {
   switch (mime) {
@@ -30,12 +92,6 @@ function extForMime(mime: string): string {
     default:
       return "bin";
   }
-}
-
-function parseIsoDate(s: string | null): Date | null {
-  if (!s) return null;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function resolveAccountingAccount(suggestedName: string | null) {
@@ -78,17 +134,22 @@ export async function uploadInvoice(formData: FormData) {
     throw new Error("No se recibió ningún archivo.");
   }
 
-  if (!ALLOWED.has(file.type)) {
-    throw new Error("Solo se permiten PDF, JPG o PNG.");
-  }
-
   if (file.size > MAX_BYTES) {
     throw new Error("El archivo supera los 10 MB.");
   }
 
-  const userId = await getDefaultUserId();
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+  const userId = session.user.id;
   const buffer = Buffer.from(await file.arrayBuffer());
-  const mimeType = file.type;
+  const mimeType = resolveInvoiceMimeType(file, buffer);
+  if (!mimeType) {
+    throw new Error(
+      "Solo se permiten PDF, JPG o PNG. Si es un JPEG, probá renombrar a .jpg o .jpeg.",
+    );
+  }
   const ext = extForMime(mimeType);
   const key = `invoices/${userId}/${randomUUID()}.${ext}`;
 
@@ -109,8 +170,18 @@ export async function uploadInvoice(formData: FormData) {
     let extracted: InvoiceExtraction;
 
     if (mimeType === "application/pdf") {
-      rawOcrText = await runOcr(buffer, mimeType);
-      extracted = await extractInvoiceData(rawOcrText);
+      const pdfText = await runOcr(buffer, mimeType);
+      if (pdfEmbeddedTextIsWeak(pdfText)) {
+        const pagePng = await rasterizePdfFirstPagePng(buffer);
+        extracted = await extractInvoiceDataFromImage(pagePng, "image/png");
+        rawOcrText =
+          pdfText.trim().length > 0
+            ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en la página 1.]`
+            : "[PDF escaneado sin texto seleccionable: campos inferidos por visión en la página 1.]";
+      } else {
+        rawOcrText = pdfText;
+        extracted = await extractInvoiceData(pdfText);
+      }
     } else {
       extracted = await extractInvoiceDataFromImage(
         buffer,
@@ -119,16 +190,17 @@ export async function uploadInvoice(formData: FormData) {
     }
 
     const account = await resolveAccountingAccount(extracted.accounting_account);
+    const providerCuit = normalizeArgentineCuitOrNull(extracted.cuit);
 
     await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
         rawOcrText,
         providerName: extracted.provider,
-        providerCuit: extracted.cuit,
+        providerCuit,
         invoiceNumber: extracted.invoice_number,
         invoiceType: extracted.invoice_type,
-        invoiceDate: parseIsoDate(extracted.invoice_date),
+        invoiceDate: parseAiInvoiceDate(extracted.invoice_date),
         netAmount:
           extracted.net_amount != null
             ? new Prisma.Decimal(extracted.net_amount)
