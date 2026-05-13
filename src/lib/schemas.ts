@@ -10,7 +10,7 @@ export const invoiceExtractionSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "CUIT del EMISOR (11 dígitos, XX-XXXXXXXX-X), el del membrete vendedor; nunca el del recuadro CLIENTE",
+      "CUIT del EMISOR: solo cabecera/membrete (11 dígitos, formato XX-XXXXXXXX-X). Nunca cliente/receptor. Si hay 11 dígitos legibles en cabecera, devolverlos aunque exista otro CUIT en el cuerpo; no null por cautela AFIP.",
     ),
   invoice_date: z
     .string()

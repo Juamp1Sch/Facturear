@@ -4,11 +4,11 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import { invoiceExtractionSchema, type InvoiceExtraction } from "@/lib/schemas";
 
 const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay varios totales, elegí el total final a pagar.
-- CUIT: normalizá a formato XX-XXXXXXXX-X si podés inferir los dígitos.
+- CUIT del EMISOR (campo "cuit"): SOLO el de la CABECERA / membrete / bloque fiscal del PROVEEDOR (arriba del documento, junto al nombre del emisor). Contá exactamente 11 dígitos y devolvé XX-XXXXXXXX-X. NUNCA uses el CUIT del cliente, destinatario, alumno ni el del cuerpo bajo "Consumidor final". Si hay dos CUITs, siempre el del encabezado del emisor. Si en cabecera se leen 11 dígitos claros (aunque haya otro CUIT abajo), devolvé esos 11 dígitos formateados: NO uses null solo por dudar del dígito verificador AFIP ni por existencia de otro CUIT en el cuerpo.
 - Fecha: ISO YYYY-MM-DD.
 - invoice_type: letra del comprobante (A, B, C, M, E) si aparece.
 - accounting_account: sugerí una categoría en español coherente con el rubro del proveedor (ej. Servicios de Telecomunicaciones).
-Si un dato no está en el texto o no es legible en la imagen, devolvé null para ese campo. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
+Para el resto de campos: si un dato no está en el texto o no es legible en la imagen, devolvé null. Para "cuit", solo null si en la cabecera del emisor no hay ningún CUIT legible. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
 
 const SYSTEM_PROMPT_TEXT = `Sos un asistente contable para Argentina. A partir del texto OCR de una factura de proveedor, extraé campos estructurados.
 ${EXTRACTION_RULES}`;
@@ -36,7 +36,7 @@ export async function extractInvoiceData(
       { role: "system", content: SYSTEM_PROMPT_TEXT },
       {
         role: "user",
-        content: `Texto OCR de la factura:\n\n${trimmed}`,
+        content: `Texto OCR de la factura. Para "cuit" usá solo el CUIT del EMISOR en cabecera/membrete (11 dígitos); ignorá CUITs de cliente o receptor en el cuerpo del texto.\n\n${trimmed}`,
       },
     ],
     response_format: zodResponseFormat(
@@ -68,7 +68,7 @@ export async function extractInvoiceDataFromImage(
         content: [
           {
             type: "text",
-            text: "Extraé los datos estructurados de esta factura (imagen).",
+            text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento.",
           },
           {
             type: "image_url",
