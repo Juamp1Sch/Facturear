@@ -22,6 +22,26 @@ function isErrorPayload(
   );
 }
 
+function mergeMaestroIntoAiJson(
+  aiPayload: unknown,
+  supplierCode: string | null,
+  providerCuit: string | null,
+  payloadIsError: boolean,
+): unknown {
+  if (payloadIsError) return aiPayload;
+  if (!aiPayload || typeof aiPayload !== "object" || Array.isArray(aiPayload)) {
+    return aiPayload;
+  }
+  const o = { ...(aiPayload as Record<string, unknown>) };
+  if (supplierCode) {
+    o.supplier_code = supplierCode;
+  }
+  if (providerCuit) {
+    o.cuit = providerCuit;
+  }
+  return o;
+}
+
 export function InvoiceDetail({
   invoice,
   previewUrl,
@@ -35,6 +55,14 @@ export function InvoiceDetail({
     showErrorBanner && isErrorPayload(invoice.aiPayload)
       ? invoice.aiPayload.error
       : null;
+
+  const payloadIsError = isErrorPayload(invoice.aiPayload);
+  const jsonForDisplay = mergeMaestroIntoAiJson(
+    invoice.aiPayload,
+    invoice.supplierCode,
+    invoice.providerCuit,
+    payloadIsError,
+  );
 
   return (
     <div className="space-y-6">
@@ -98,7 +126,7 @@ export function InvoiceDetail({
               Mostrar / ocultar
             </summary>
             <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs">
-              {JSON.stringify(invoice.aiPayload, null, 2)}
+              {JSON.stringify(jsonForDisplay, null, 2)}
             </pre>
           </details>
         </CardContent>

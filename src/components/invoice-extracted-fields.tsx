@@ -261,6 +261,16 @@ export function InvoiceExtractedFields({
                 <TableCell>{invoice.providerCuit ?? "—"}</TableCell>
               </TableRow>
               <TableRow>
+                <TableCell>Código proveedor</TableCell>
+                <TableCell>
+                  {invoice.supplierCode ?? (
+                    <span className="text-muted-foreground">
+                      Sin coincidencia en maestro (CUIT distinto o no importado)
+                    </span>
+                  )}
+                </TableCell>
+              </TableRow>
+              <TableRow>
                 <TableCell>Fecha</TableCell>
                 <TableCell>{dateStr}</TableCell>
               </TableRow>
