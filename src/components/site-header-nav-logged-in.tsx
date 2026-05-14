@@ -10,15 +10,17 @@ import { cn } from "@/lib/utils";
 export function SiteHeaderNavLoggedIn() {
   const pathname = usePathname() ?? "";
   const onHistory = pathname.startsWith("/history");
+  const onSuppliers =
+    pathname.startsWith("/proveedores") || pathname.startsWith("/carga-proveedores");
 
   return (
     <>
       <Link
         href="/upload"
-        aria-current={!onHistory ? "page" : undefined}
+        aria-current={!onHistory && !onSuppliers ? "page" : undefined}
         className={cn(
           buttonVariants({
-            variant: onHistory ? "ghost" : "default",
+            variant: onHistory || onSuppliers ? "ghost" : "default",
             size: "sm",
           }),
         )}
@@ -38,9 +40,23 @@ export function SiteHeaderNavLoggedIn() {
       >
         Historial
       </Link>
-      <form action={logout}>
-        <Button type="submit" variant="outline" size="sm">
-          Cerrar sesión
+      <Link
+        href="/proveedores"
+        aria-current={onSuppliers ? "page" : undefined}
+        className={cn(
+          buttonVariants({
+            variant: onSuppliers ? "default" : "ghost",
+            size: "sm",
+          }),
+        )}
+      >
+        <span className="sm:hidden">Prov.</span>
+        <span className="hidden sm:inline">Proveedores</span>
+      </Link>
+      <form action={logout} className="shrink-0">
+        <Button type="submit" variant="outline" size="sm" className="whitespace-nowrap px-2.5 sm:px-3">
+          <span className="sm:hidden">Salir</span>
+          <span className="hidden sm:inline">Cerrar sesión</span>
         </Button>
       </form>
     </>

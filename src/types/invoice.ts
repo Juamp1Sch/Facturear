@@ -18,6 +18,7 @@ export type SerializedInvoiceListItem = {
   totalAmount: string | null;
   netAmount: string | null;
   vatAmount: string | null;
+  supplierCode: string | null;
   aiConfidence: number | null;
   mimeType: string;
   accountingAccount: SerializedAccountingAccount | null;

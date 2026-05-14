@@ -42,7 +42,9 @@ export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem })
             </Badge>
           </div>
           <CardDescription className="line-clamp-1">
-            {invoice.providerCuit ?? "CUIT —"} · {dateStr}
+            {invoice.providerCuit ?? "CUIT —"} ·{" "}
+            {invoice.supplierCode ? `Cód. ${invoice.supplierCode} · ` : null}
+            {dateStr}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">

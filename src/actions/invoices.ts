@@ -18,6 +18,9 @@ import {
 } from "@/lib/cuit-argentina";
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { prisma } from "@/lib/db";
+import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
+import { resolveSupplierFromMaestro } from "@/lib/supplier-match";
+import { findSupplierCodeForUserCuit } from "@/lib/supplier-sync";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { uploadBuffer } from "@/lib/storage";
@@ -169,6 +172,10 @@ export async function uploadInvoice(formData: FormData) {
   });
 
   try {
+    const extractOpts = {
+      maestroCuitHintsBlock: await loadSupplierMaestroCuitHintsBlock(userId),
+    };
+
     let rawOcrText: string | null = null;
     let extracted: InvoiceExtraction;
 
@@ -176,24 +183,44 @@ export async function uploadInvoice(formData: FormData) {
       const pdfText = await runOcr(buffer, mimeType);
       if (pdfEmbeddedTextIsWeak(pdfText)) {
         const pagePng = await rasterizePdfFirstPagePng(buffer);
-        extracted = await extractInvoiceDataFromImage(pagePng, "image/png");
+        extracted = await extractInvoiceDataFromImage(pagePng, "image/png", extractOpts);
         rawOcrText =
           pdfText.trim().length > 0
             ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en la página 1.]`
             : "[PDF escaneado sin texto seleccionable: campos inferidos por visión en la página 1.]";
       } else {
         rawOcrText = pdfText;
-        extracted = await extractInvoiceData(pdfText);
+        extracted = await extractInvoiceData(pdfText, extractOpts);
       }
     } else {
       extracted = await extractInvoiceDataFromImage(
         buffer,
         mimeType as "image/jpeg" | "image/png",
+        extractOpts,
       );
     }
 
     const account = await resolveAccountingAccount(extracted.accounting_account);
-    const providerCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
+
+    const resolved = await resolveSupplierFromMaestro(
+      userId,
+      extracted.provider,
+      extracted.cuit,
+    );
+    const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
+    const providerCuit = resolved?.cuit ?? aiCuit;
+    const supplierCode =
+      resolved?.code ?? (await findSupplierCodeForUserCuit(userId, aiCuit));
+
+    const aiPayloadOut: Record<string, unknown> = {
+      ...(extracted as Record<string, unknown>),
+    };
+    if (supplierCode) {
+      aiPayloadOut.supplier_code = supplierCode;
+    }
+    if (resolved?.cuit) {
+      aiPayloadOut.cuit = providerCuit;
+    }
 
     await prisma.invoice.update({
       where: { id: invoice.id },
@@ -201,6 +228,7 @@ export async function uploadInvoice(formData: FormData) {
         rawOcrText,
         providerName: extracted.provider,
         providerCuit,
+        supplierCode,
         invoiceNumber: extracted.invoice_number,
         invoiceType: extracted.invoice_type,
         invoiceDate: parseAiInvoiceDate(extracted.invoice_date),
@@ -218,7 +246,7 @@ export async function uploadInvoice(formData: FormData) {
             : null,
         accountingAccountId: account?.id ?? null,
         aiConfidence: extracted.confidence,
-        aiPayload: extracted as object,
+        aiPayload: aiPayloadOut as object,
         status: "READY",
       },
     });
@@ -359,6 +387,16 @@ export async function updateInvoiceExtractedFields(
     };
   }
 
+  const resolved = await resolveSupplierFromMaestro(
+    session.user.id,
+    providerName,
+    providerCuit,
+  );
+  const finalCuit = resolved?.cuit ?? providerCuit;
+  const supplierCode =
+    resolved?.code ??
+    (await findSupplierCodeForUserCuit(session.user.id, providerCuit));
+
   const nextStatus: InvoiceStatus =
     existing.status === "ERROR"
       ? "READY"
@@ -370,7 +408,8 @@ export async function updateInvoiceExtractedFields(
     where: { id: invoiceId },
     data: {
       providerName,
-      providerCuit,
+      providerCuit: finalCuit,
+      supplierCode,
       invoiceNumber,
       invoiceType,
       invoiceDate,

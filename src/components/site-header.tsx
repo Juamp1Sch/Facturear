@@ -11,7 +11,7 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b border-border bg-muted/40">
-      <div className="mx-auto grid max-w-5xl grid-cols-3 items-center gap-2 px-4 py-3 sm:gap-4">
+      <div className="mx-auto grid max-w-5xl grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 sm:gap-4">
         <div className="min-w-0" aria-hidden="true" />
 
         <Link
@@ -27,7 +27,7 @@ export async function SiteHeader() {
           <span className="truncate">Facturear</span>
         </Link>
 
-        <nav className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+        <nav className="flex min-w-0 flex-nowrap items-center justify-end gap-1 sm:gap-1.5">
           {loggedIn ? (
             <SiteHeaderNavLoggedIn />
           ) : (

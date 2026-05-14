@@ -13,6 +13,7 @@ model User {
   email     String    @unique
   passwordHash String? @map("password_hash")
   invoices  Invoice[]
+  suppliers Supplier[]
   createdAt DateTime  @default(now()) @map("created_at")
 }
 
@@ -26,6 +27,7 @@ model Invoice {
   rawOcrText          String?            @map("raw_ocr_text") @db.Text
   providerName        String?            @map("provider_name")
   providerCuit        String?            @map("provider_cuit")
+  supplierCode        String?            @map("supplier_code")
   invoiceNumber       String?            @map("invoice_number")
   invoiceType         String?            @map("invoice_type")
   invoiceDate         DateTime?          @map("invoice_date")
@@ -64,4 +66,20 @@ enum InvoiceStatus {
   READY
   ERROR
   CORRECTED
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  cuit      String?
+  name      String
+  address   String?  @db.Text
+  locality  String?  @map("locality")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, code])
+  @@map("suppliers")
 }
