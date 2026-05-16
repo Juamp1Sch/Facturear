@@ -33,7 +33,7 @@ export default function RootLayout({
       className={`${nunito.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="flex min-h-full flex-col" suppressHydrationWarning>
+      <body className="flex min-h-full flex-col overflow-x-hidden" suppressHydrationWarning>
         <SiteHeader />
         {children}
       </body>

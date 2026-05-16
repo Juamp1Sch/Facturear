@@ -17,7 +17,7 @@ export default async function CuentasPage({
 }) {
   if (!isDatabaseConfigured()) {
     return (
-      <main className="mx-auto max-w-5xl flex-1 px-4 py-8">
+      <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">Cuentas</h1>
         <DatabaseSetupCard variant="page" />
       </main>
@@ -37,7 +37,7 @@ export default async function CuentasPage({
     await listChartAccountsPageForUser(requestedPage);
 
   return (
-    <main className="mx-auto max-w-5xl flex-1 px-4 py-8">
+    <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
       <CuentasShell>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Plan de cuentas importado desde tu sistema (Efectivo, bancos, Mercado Pago, etc.). Al

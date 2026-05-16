@@ -14,13 +14,13 @@ export function ProveedoresShell({ children }: { children: React.ReactNode }) {
   const onCarga = pathname.startsWith("/carga-proveedores");
 
   return (
-    <div className="space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Proveedores</h1>
 
       <div
         role="tablist"
         aria-label="Secciones de proveedores"
-        className="flex flex-wrap gap-1 border-b border-border"
+        className="flex gap-1 overflow-x-auto border-b border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <Link
           href="/proveedores"
@@ -29,6 +29,7 @@ export function ProveedoresShell({ children }: { children: React.ReactNode }) {
           aria-current={onMis ? "page" : undefined}
           className={cn(
             tabClass,
+            "shrink-0 whitespace-nowrap",
             onMis
               ? "border-border border-b-transparent bg-background text-foreground"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -43,6 +44,7 @@ export function ProveedoresShell({ children }: { children: React.ReactNode }) {
           aria-current={onCarga ? "page" : undefined}
           className={cn(
             tabClass,
+            "shrink-0 whitespace-nowrap",
             onCarga
               ? "border-border border-b-transparent bg-background text-foreground"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",

@@ -15,14 +15,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
@@ -244,72 +236,62 @@ export function InvoiceExtractedFields({
             <EditFormActions onCancel={closeEdit} />
           </form>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Campo</TableHead>
-                <TableHead>Valor</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell>Proveedor</TableCell>
-                <TableCell>{invoice.providerName ?? "—"}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>CUIT</TableCell>
-                <TableCell>{invoice.providerCuit ?? "—"}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Código proveedor</TableCell>
-                <TableCell>
-                  {invoice.supplierCode ?? (
-                    <span className="text-muted-foreground">
-                      Sin coincidencia en maestro (CUIT distinto o no importado)
-                    </span>
-                  )}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Fecha</TableCell>
-                <TableCell>{dateStr}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Nº comprobante</TableCell>
-                <TableCell>{invoice.invoiceNumber ?? "—"}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Tipo</TableCell>
-                <TableCell>{invoice.invoiceType ?? "—"}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Neto</TableCell>
-                <TableCell>{formatMoney(invoice.netAmount)}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>IVA</TableCell>
-                <TableCell>{formatMoney(invoice.vatAmount)}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Total</TableCell>
-                <TableCell className="font-medium">
-                  {formatMoney(invoice.totalAmount)}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Cuenta</TableCell>
-                <TableCell>
-                  {invoice.chartAccount ? (
-                    `${invoice.chartAccount.code} — ${invoice.chartAccount.name}`
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Sin asignar (importá el plan en Cuentas)
-                    </span>
-                  )}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+          <dl className="divide-y divide-border rounded-lg border border-border">
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Proveedor</dt>
+              <dd className="text-sm break-words">{invoice.providerName ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">CUIT</dt>
+              <dd className="text-sm break-words">{invoice.providerCuit ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Código proveedor</dt>
+              <dd className="text-sm break-words">
+                {invoice.supplierCode ?? (
+                  <span className="text-muted-foreground">
+                    Sin coincidencia en maestro (CUIT distinto o no importado)
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Fecha</dt>
+              <dd className="text-sm">{dateStr}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Nº comprobante</dt>
+              <dd className="text-sm break-words">{invoice.invoiceNumber ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Tipo</dt>
+              <dd className="text-sm">{invoice.invoiceType ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Neto</dt>
+              <dd className="text-sm">{formatMoney(invoice.netAmount)}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">IVA</dt>
+              <dd className="text-sm">{formatMoney(invoice.vatAmount)}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Total</dt>
+              <dd className="text-sm font-medium">{formatMoney(invoice.totalAmount)}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Cuenta</dt>
+              <dd className="text-sm break-words">
+                {invoice.chartAccount ? (
+                  `${invoice.chartAccount.code} — ${invoice.chartAccount.name}`
+                ) : (
+                  <span className="text-muted-foreground">
+                    Sin asignar (importá el plan en Cuentas)
+                  </span>
+                )}
+              </dd>
+            </div>
+          </dl>
         )}
       </CardContent>
     </Card>
