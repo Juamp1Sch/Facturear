@@ -225,18 +225,18 @@ export function InvoiceExtractedFields({
                 />
               </div>
               <div className="space-y-2 sm:col-span-2">
-                <label htmlFor="accountingAccountName" className="text-sm font-medium">
-                  Cuenta contable (nombre)
+                <label htmlFor="chartAccountCode" className="text-sm font-medium">
+                  Cuenta
                 </label>
                 <Input
-                  id="accountingAccountName"
-                  name="accountingAccountName"
-                  defaultValue={invoice.accountingAccount?.name ?? ""}
-                  placeholder="Ej. Servicios de telecomunicaciones"
+                  id="chartAccountCode"
+                  name="chartAccountCode"
+                  defaultValue={invoice.chartAccount?.code ?? ""}
+                  placeholder="Ej. 1001, 2007"
+                  autoComplete="off"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Se busca una cuenta existente por nombre; si no existe, se crea una
-                  automática como al procesar la factura.
+                  Código del plan importado en Cuentas (Efectivo, Mercado Pago, Galicia, etc.).
                 </p>
               </div>
             </div>
@@ -297,11 +297,15 @@ export function InvoiceExtractedFields({
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Cuenta contable</TableCell>
+                <TableCell>Cuenta</TableCell>
                 <TableCell>
-                  {invoice.accountingAccount
-                    ? `${invoice.accountingAccount.code} — ${invoice.accountingAccount.name}`
-                    : "—"}
+                  {invoice.chartAccount ? (
+                    `${invoice.chartAccount.code} — ${invoice.chartAccount.name}`
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Sin asignar (importá el plan en Cuentas)
+                    </span>
+                  )}
                 </TableCell>
               </TableRow>
             </TableBody>

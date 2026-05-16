@@ -12,17 +12,21 @@ export function SiteHeaderNavLoggedIn() {
   const onHistory = pathname.startsWith("/history");
   const onSuppliers =
     pathname.startsWith("/proveedores") || pathname.startsWith("/carga-proveedores");
+  const onAccounts =
+    pathname.startsWith("/cuentas") || pathname.startsWith("/carga-cuentas");
+  const onPrimary = !onHistory && !onSuppliers && !onAccounts;
 
   return (
     <>
       <Link
         href="/upload"
-        aria-current={!onHistory && !onSuppliers ? "page" : undefined}
+        aria-current={onPrimary ? "page" : undefined}
         className={cn(
           buttonVariants({
-            variant: onHistory || onSuppliers ? "ghost" : "default",
+            variant: onPrimary ? "default" : "ghost",
             size: "sm",
           }),
+          "shrink-0",
         )}
       >
         <span className="sm:hidden">Subir</span>
@@ -36,6 +40,7 @@ export function SiteHeaderNavLoggedIn() {
             variant: onHistory ? "default" : "ghost",
             size: "sm",
           }),
+          "shrink-0",
         )}
       >
         Historial
@@ -48,10 +53,24 @@ export function SiteHeaderNavLoggedIn() {
             variant: onSuppliers ? "default" : "ghost",
             size: "sm",
           }),
+          "shrink-0",
         )}
       >
         <span className="sm:hidden">Prov.</span>
         <span className="hidden sm:inline">Proveedores</span>
+      </Link>
+      <Link
+        href="/cuentas"
+        aria-current={onAccounts ? "page" : undefined}
+        className={cn(
+          buttonVariants({
+            variant: onAccounts ? "default" : "ghost",
+            size: "sm",
+          }),
+          "shrink-0",
+        )}
+      >
+        Cuentas
       </Link>
       <form action={logout} className="shrink-0">
         <Button type="submit" variant="outline" size="sm" className="whitespace-nowrap px-2.5 sm:px-3">

@@ -7,6 +7,13 @@ export type SerializedAccountingAccount = {
   type: string;
 };
 
+export type SerializedChartAccount = {
+  id: string;
+  code: string;
+  name: string;
+  type: string | null;
+};
+
 export type SerializedInvoiceListItem = {
   id: string;
   status: InvoiceStatus;
@@ -22,6 +29,7 @@ export type SerializedInvoiceListItem = {
   aiConfidence: number | null;
   mimeType: string;
   accountingAccount: SerializedAccountingAccount | null;
+  chartAccount: SerializedChartAccount | null;
 };
 
 export type SerializedInvoiceDetail = SerializedInvoiceListItem & {

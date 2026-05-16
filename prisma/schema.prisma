@@ -8,13 +8,15 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  name      String
-  email     String    @unique
-  passwordHash String? @map("password_hash")
-  invoices  Invoice[]
-  suppliers Supplier[]
-  createdAt DateTime  @default(now()) @map("created_at")
+  id            String         @id @default(cuid())
+  name          String
+  email         String         @unique
+  passwordHash  String?        @map("password_hash")
+  invoices      Invoice[]
+  suppliers     Supplier[]
+  chartAccounts         ChartAccount[]
+  supplierChartAccounts SupplierChartAccountLink[]
+  createdAt             DateTime                   @default(now()) @map("created_at")
 }
 
 model Invoice {
@@ -36,6 +38,8 @@ model Invoice {
   totalAmount         Decimal?           @map("total_amount") @db.Decimal(14, 2)
   accountingAccountId String?            @map("accounting_account_id")
   accountingAccount   AccountingAccount? @relation(fields: [accountingAccountId], references: [id])
+  chartAccountId      String?            @map("chart_account_id")
+  chartAccount        ChartAccount?      @relation(fields: [chartAccountId], references: [id])
   status              InvoiceStatus      @default(PROCESSING)
   aiConfidence        Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")
@@ -69,17 +73,50 @@ enum InvoiceStatus {
 }
 
 model Supplier {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  code      String
-  cuit      String?
-  name      String
-  address   String?  @db.Text
-  locality  String?  @map("locality")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                 String                     @id @default(cuid())
+  userId             String                     @map("user_id")
+  user               User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code               String
+  cuit               String?
+  name               String
+  address            String?                    @db.Text
+  locality           String?                    @map("locality")
+  chartAccountLink   SupplierChartAccountLink?
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
 
   @@unique([userId, code])
   @@map("suppliers")
+}
+
+model ChartAccount {
+  id            String                     @id @default(cuid())
+  userId        String                     @map("user_id")
+  user          User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code          String
+  name          String
+  type          String?                    @map("account_type")
+  active        Boolean                    @default(true)
+  invoices      Invoice[]
+  supplierLinks SupplierChartAccountLink[]
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  @@unique([userId, code])
+  @@map("chart_accounts")
+}
+
+model SupplierChartAccountLink {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplierId     String       @unique @map("supplier_id")
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  chartAccountId String       @map("chart_account_id")
+  chartAccount   ChartAccount @relation(fields: [chartAccountId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@unique([userId, supplierId])
+  @@map("supplier_chart_account_links")
 }

@@ -22,7 +22,8 @@ export function HistoryList({
         inv.providerCuit,
         inv.invoiceNumber,
         inv.supplierCode,
-        inv.accountingAccount?.name,
+        inv.chartAccount?.name,
+        inv.chartAccount?.code,
       ]
         .filter(Boolean)
         .join(" ")

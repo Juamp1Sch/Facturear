@@ -24,10 +24,12 @@ export const invoiceExtractionSchema = z.object({
   net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
   vat_amount: z.number().nullable().describe("Importe de IVA"),
   total_amount: z.number().nullable().describe("Importe total"),
-  accounting_account: z
+  chart_account_code: z
     .string()
     .nullable()
-    .describe("Nombre sugerido de cuenta contable en español"),
+    .describe(
+      "Código de cuenta del plan importado (columna Cuenta: ej. 1001 Efectivo, 2007 Galicia). Solo si hay plan cargado y hay señal en el comprobante.",
+    ),
   confidence: z.number().min(0).max(1).describe("Confianza global 0-1"),
 });
 
