@@ -35,7 +35,9 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col overflow-x-hidden" suppressHydrationWarning>
         <SiteHeader />
-        {children}
+        <div className="flex w-full min-w-0 flex-1 flex-col items-center">
+          {children}
+        </div>
       </body>
     </html>
   );

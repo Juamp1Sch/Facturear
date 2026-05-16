@@ -87,7 +87,7 @@ export function UploadForm() {
   }, [preview]);
 
   return (
-    <Card className="max-w-xl">
+    <Card className="mx-auto w-full max-w-xl">
       <CardHeader>
         <CardTitle>Subir factura</CardTitle>
         <CardDescription>

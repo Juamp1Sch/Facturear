@@ -11,7 +11,7 @@ export async function SiteHeader() {
   const loggedIn = Boolean(session?.user?.id);
 
   return (
-    <header className="border-b border-border bg-muted/40">
+    <header className="w-full border-b border-border bg-muted/40">
       <div className="relative mx-auto flex h-14 w-full items-center justify-between px-4 sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-2 md:flex-1">
           <SiteMobileNav loggedIn={loggedIn} />
