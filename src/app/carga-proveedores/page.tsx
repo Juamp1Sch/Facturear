@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function CargaProveedoresPage() {
   if (!isDatabaseConfigured()) {
     return (
-      <main className="mx-auto max-w-5xl flex-1 px-4 py-8">
+      <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">Proveedores</h1>
         <DatabaseSetupCard variant="page" />
       </main>
@@ -27,7 +27,7 @@ export default async function CargaProveedoresPage() {
   const supplierCount = await countSuppliersForUser();
 
   return (
-    <main className="mx-auto max-w-5xl flex-1 px-4 py-8">
+    <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
       <ProveedoresShell>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Importá el maestro de proveedores de tu sistema contable. El CUIT en el archivo es

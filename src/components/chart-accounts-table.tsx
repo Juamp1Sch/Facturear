@@ -19,7 +19,7 @@ export function ChartAccountsTable({ accounts }: { accounts: SerializedChartAcco
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div className="max-w-full min-w-0 overflow-x-auto rounded-lg border border-border">
       <Table>
         <TableHeader>
           <TableRow>
