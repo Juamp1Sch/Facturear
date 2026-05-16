@@ -11,12 +11,10 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b border-border bg-muted/40">
-      <div className="mx-auto grid max-w-5xl grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 sm:gap-4">
-        <div className="min-w-0" aria-hidden="true" />
-
+      <div className="relative mx-auto flex h-14 w-full items-center justify-end px-4 sm:px-6 lg:px-10">
         <Link
           href={loggedIn ? "/upload" : "/"}
-          className="flex items-center justify-center gap-2 justify-self-center text-lg font-semibold tracking-tight text-brand-subsection"
+          className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-lg font-semibold tracking-tight text-brand-subsection"
         >
           <span
             className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-brand-logo text-sm font-bold text-white shadow-sm"
@@ -24,10 +22,13 @@ export async function SiteHeader() {
           >
             F
           </span>
-          <span className="truncate">Facturear</span>
+          <span className="whitespace-nowrap">Facturear</span>
         </Link>
 
-        <nav className="flex min-w-0 flex-nowrap items-center justify-end gap-1 sm:gap-1.5">
+        <nav
+          className="relative z-10 flex max-w-[min(100%,calc(50%-5.75rem))] flex-nowrap items-center justify-end gap-1 overflow-x-auto sm:gap-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          aria-label="Navegación principal"
+        >
           {loggedIn ? (
             <SiteHeaderNavLoggedIn />
           ) : (

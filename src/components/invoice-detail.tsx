@@ -26,6 +26,7 @@ function mergeMaestroIntoAiJson(
   aiPayload: unknown,
   supplierCode: string | null,
   providerCuit: string | null,
+  chartAccount: { code: string; name: string } | null,
   payloadIsError: boolean,
 ): unknown {
   if (payloadIsError) return aiPayload;
@@ -38,6 +39,10 @@ function mergeMaestroIntoAiJson(
   }
   if (providerCuit) {
     o.cuit = providerCuit;
+  }
+  if (chartAccount) {
+    o.chart_account_code = chartAccount.code;
+    o.chart_account_name = chartAccount.name;
   }
   return o;
 }
@@ -61,6 +66,7 @@ export function InvoiceDetail({
     invoice.aiPayload,
     invoice.supplierCode,
     invoice.providerCuit,
+    invoice.chartAccount,
     payloadIsError,
   );
 

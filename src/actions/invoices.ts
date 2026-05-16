@@ -18,6 +18,9 @@ import {
 } from "@/lib/cuit-argentina";
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { prisma } from "@/lib/db";
+import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
+import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
+import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
 import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
 import { resolveSupplierFromMaestro } from "@/lib/supplier-match";
 import { findSupplierCodeForUserCuit } from "@/lib/supplier-sync";
@@ -172,9 +175,11 @@ export async function uploadInvoice(formData: FormData) {
   });
 
   try {
-    const extractOpts = {
-      maestroCuitHintsBlock: await loadSupplierMaestroCuitHintsBlock(userId),
-    };
+    const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
+      loadSupplierMaestroCuitHintsBlock(userId),
+      loadChartAccountHintsBlock(userId),
+    ]);
+    const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
 
     let rawOcrText: string | null = null;
     let extracted: InvoiceExtraction;
@@ -212,6 +217,14 @@ export async function uploadInvoice(formData: FormData) {
     const supplierCode =
       resolved?.code ?? (await findSupplierCodeForUserCuit(userId, aiCuit));
 
+    let chartAccount =
+      (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
+      (await resolveChartAccountForExtraction(
+        userId,
+        extracted.chart_account_code,
+        extracted.accounting_account,
+      ));
+
     const aiPayloadOut: Record<string, unknown> = {
       ...(extracted as Record<string, unknown>),
     };
@@ -220,6 +233,10 @@ export async function uploadInvoice(formData: FormData) {
     }
     if (resolved?.cuit) {
       aiPayloadOut.cuit = providerCuit;
+    }
+    if (chartAccount) {
+      aiPayloadOut.chart_account_code = chartAccount.code;
+      aiPayloadOut.chart_account_name = chartAccount.name;
     }
 
     await prisma.invoice.update({
@@ -245,6 +262,7 @@ export async function uploadInvoice(formData: FormData) {
             ? new Prisma.Decimal(extracted.total_amount)
             : null,
         accountingAccountId: account?.id ?? null,
+        chartAccountId: chartAccount?.id ?? null,
         aiConfidence: extracted.confidence,
         aiPayload: aiPayloadOut as object,
         status: "READY",
@@ -397,12 +415,30 @@ export async function updateInvoiceExtractedFields(
     resolved?.code ??
     (await findSupplierCodeForUserCuit(session.user.id, providerCuit));
 
+  const chartAccountCode = formText(formData.get("chartAccountCode"));
+  let chartAccount = chartAccountCode
+    ? await resolveChartAccountForExtraction(session.user.id, chartAccountCode, null)
+    : await resolveChartAccountForSupplierCode(session.user.id, supplierCode);
+
   const nextStatus: InvoiceStatus =
     existing.status === "ERROR"
       ? "READY"
       : existing.status === "READY"
         ? "CORRECTED"
         : existing.status;
+
+  const existingPayload =
+    existing.aiPayload && typeof existing.aiPayload === "object" && !Array.isArray(existing.aiPayload)
+      ? (existing.aiPayload as Record<string, unknown>)
+      : {};
+  const nextPayload = { ...existingPayload };
+  if (chartAccount) {
+    nextPayload.chart_account_code = chartAccount.code;
+    nextPayload.chart_account_name = chartAccount.name;
+  } else {
+    delete nextPayload.chart_account_code;
+    delete nextPayload.chart_account_name;
+  }
 
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -417,6 +453,8 @@ export async function updateInvoiceExtractedFields(
       vatAmount,
       totalAmount,
       accountingAccountId,
+      chartAccountId: chartAccount?.id ?? null,
+      aiPayload: nextPayload as object,
       status: nextStatus,
     },
   });

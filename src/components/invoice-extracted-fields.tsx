@@ -224,6 +224,22 @@ export function InvoiceExtractedFields({
                   placeholder="0 o 1234,56"
                 />
               </div>
+              <div className="space-y-2">
+                <label htmlFor="chartAccountCode" className="text-sm font-medium">
+                  Cuenta (plan de cuentas)
+                </label>
+                <Input
+                  id="chartAccountCode"
+                  name="chartAccountCode"
+                  defaultValue={invoice.chartAccount?.code ?? ""}
+                  placeholder="Ej. 1001, 2007"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Código del plan importado (Efectivo, Mercado Pago, Galicia, etc.). Debe existir en
+                  Cuentas.
+                </p>
+              </div>
               <div className="space-y-2 sm:col-span-2">
                 <label htmlFor="accountingAccountName" className="text-sm font-medium">
                   Cuenta contable (nombre)
@@ -294,6 +310,18 @@ export function InvoiceExtractedFields({
                 <TableCell>Total</TableCell>
                 <TableCell className="font-medium">
                   {formatMoney(invoice.totalAmount)}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Cuenta</TableCell>
+                <TableCell>
+                  {invoice.chartAccount ? (
+                    `${invoice.chartAccount.code} — ${invoice.chartAccount.name}`
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Sin asignar (importá el plan en Cuentas)
+                    </span>
+                  )}
                 </TableCell>
               </TableRow>
               <TableRow>

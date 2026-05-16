@@ -27,7 +27,13 @@ export const invoiceExtractionSchema = z.object({
   accounting_account: z
     .string()
     .nullable()
-    .describe("Nombre sugerido de cuenta contable en español"),
+    .describe("Nombre sugerido de cuenta contable de gasto en español"),
+  chart_account_code: z
+    .string()
+    .nullable()
+    .describe(
+      "Código de cuenta del plan importado (columna Cuenta: ej. 1001 Efectivo, 2007 Galicia). Solo si hay plan cargado y hay señal en el comprobante.",
+    ),
   confidence: z.number().min(0).max(1).describe("Confianza global 0-1"),
 });
 
