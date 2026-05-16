@@ -29,7 +29,7 @@ export default async function HistoryPage() {
   const rows = await prisma.invoice.findMany({
     where: { userId: session.user.id },
     orderBy: { createdAt: "desc" },
-    include: { accountingAccount: true, chartAccount: true },
+    include: { chartAccount: true },
     take: 200,
   });
 

@@ -24,10 +24,6 @@ export const invoiceExtractionSchema = z.object({
   net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
   vat_amount: z.number().nullable().describe("Importe de IVA"),
   total_amount: z.number().nullable().describe("Importe total"),
-  accounting_account: z
-    .string()
-    .nullable()
-    .describe("Nombre sugerido de cuenta contable de gasto en español"),
   chart_account_code: z
     .string()
     .nullable()

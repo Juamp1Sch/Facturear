@@ -224,9 +224,9 @@ export function InvoiceExtractedFields({
                   placeholder="0 o 1234,56"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 sm:col-span-2">
                 <label htmlFor="chartAccountCode" className="text-sm font-medium">
-                  Cuenta (plan de cuentas)
+                  Cuenta
                 </label>
                 <Input
                   id="chartAccountCode"
@@ -236,23 +236,7 @@ export function InvoiceExtractedFields({
                   autoComplete="off"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Código del plan importado (Efectivo, Mercado Pago, Galicia, etc.). Debe existir en
-                  Cuentas.
-                </p>
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <label htmlFor="accountingAccountName" className="text-sm font-medium">
-                  Cuenta contable (nombre)
-                </label>
-                <Input
-                  id="accountingAccountName"
-                  name="accountingAccountName"
-                  defaultValue={invoice.accountingAccount?.name ?? ""}
-                  placeholder="Ej. Servicios de telecomunicaciones"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Se busca una cuenta existente por nombre; si no existe, se crea una
-                  automática como al procesar la factura.
+                  Código del plan importado en Cuentas (Efectivo, Mercado Pago, Galicia, etc.).
                 </p>
               </div>
             </div>
@@ -322,14 +306,6 @@ export function InvoiceExtractedFields({
                       Sin asignar (importá el plan en Cuentas)
                     </span>
                   )}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Cuenta contable</TableCell>
-                <TableCell>
-                  {invoice.accountingAccount
-                    ? `${invoice.accountingAccount.code} — ${invoice.accountingAccount.name}`
-                    : "—"}
                 </TableCell>
               </TableRow>
             </TableBody>

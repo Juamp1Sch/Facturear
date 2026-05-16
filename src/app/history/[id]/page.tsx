@@ -38,7 +38,7 @@ export default async function InvoiceDetailPage({
 
   const invoice = await prisma.invoice.findFirst({
     where: { id, userId: session.user.id },
-    include: { accountingAccount: true, chartAccount: true },
+    include: { chartAccount: true },
   });
 
   if (!invoice) notFound();

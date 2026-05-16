@@ -58,10 +58,6 @@ export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem })
             <p className="text-muted-foreground line-clamp-1">
               Cuenta: {invoice.chartAccount.code} — {invoice.chartAccount.name}
             </p>
-          ) : invoice.accountingAccount ? (
-            <p className="text-muted-foreground line-clamp-1">
-              {invoice.accountingAccount.code} — {invoice.accountingAccount.name}
-            </p>
           ) : null}
         </CardContent>
       </Card>

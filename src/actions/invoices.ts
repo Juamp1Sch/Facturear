@@ -103,34 +103,6 @@ function extForMime(mime: string): string {
   }
 }
 
-async function resolveAccountingAccount(suggestedName: string | null) {
-  if (!suggestedName?.trim()) return null;
-  const name = suggestedName.trim();
-
-  let acc = await prisma.accountingAccount.findFirst({
-    where: { name: { equals: name, mode: "insensitive" } },
-  });
-  if (acc) return acc;
-
-  acc = await prisma.accountingAccount.findFirst({
-    where: {
-      OR: [
-        { name: { contains: name.slice(0, 24), mode: "insensitive" } },
-        { name: { startsWith: name.slice(0, 12), mode: "insensitive" } },
-      ],
-    },
-  });
-  if (acc) return acc;
-
-  return prisma.accountingAccount.create({
-    data: {
-      code: `AUTO-${Date.now().toString(36).toUpperCase()}`,
-      name,
-      type: "Gasto",
-    },
-  });
-}
-
 export async function uploadInvoice(formData: FormData) {
   if (!isDatabaseConfigured()) {
     throw new Error(
@@ -205,8 +177,6 @@ export async function uploadInvoice(formData: FormData) {
       );
     }
 
-    const account = await resolveAccountingAccount(extracted.accounting_account);
-
     const resolved = await resolveSupplierFromMaestro(
       userId,
       extracted.provider,
@@ -219,11 +189,7 @@ export async function uploadInvoice(formData: FormData) {
 
     let chartAccount =
       (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
-      (await resolveChartAccountForExtraction(
-        userId,
-        extracted.chart_account_code,
-        extracted.accounting_account,
-      ));
+      (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
 
     const aiPayloadOut: Record<string, unknown> = {
       ...(extracted as Record<string, unknown>),
@@ -261,7 +227,6 @@ export async function uploadInvoice(formData: FormData) {
           extracted.total_amount != null
             ? new Prisma.Decimal(extracted.total_amount)
             : null,
-        accountingAccountId: account?.id ?? null,
         chartAccountId: chartAccount?.id ?? null,
         aiConfidence: extracted.confidence,
         aiPayload: aiPayloadOut as object,
@@ -393,18 +358,6 @@ export async function updateInvoiceExtractedFields(
     throw e;
   }
 
-  const accountingName = formText(formData.get("accountingAccountName"));
-  let accountingAccountId: string | null = null;
-  try {
-    const acc = await resolveAccountingAccount(accountingName);
-    accountingAccountId = acc?.id ?? null;
-  } catch {
-    return {
-      ok: false,
-      error: "No se pudo guardar la cuenta contable. Probá de nuevo.",
-    };
-  }
-
   const resolved = await resolveSupplierFromMaestro(
     session.user.id,
     providerName,
@@ -452,7 +405,6 @@ export async function updateInvoiceExtractedFields(
       netAmount,
       vatAmount,
       totalAmount,
-      accountingAccountId,
       chartAccountId: chartAccount?.id ?? null,
       aiPayload: nextPayload as object,
       status: nextStatus,
