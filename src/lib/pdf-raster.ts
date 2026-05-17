@@ -1,3 +1,5 @@
+// Required by pdfjs-dist on the server (scanned PDF → PNG). Must be a direct dependency.
+import "@napi-rs/canvas";
 import { pdf } from "pdf-to-img";
 
 /** Primera página del PDF como PNG (para PDFs escaneados sin capa de texto). */
