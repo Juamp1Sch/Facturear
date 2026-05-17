@@ -8,6 +8,7 @@ import { validateArgentineCuitForEntry } from "@/lib/cuit-argentina";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { prisma } from "@/lib/db";
 import { parseSupplierMasterBuffer } from "@/lib/supplier-import-parse";
+import { buildSupplierSearchWhere } from "@/lib/supplier-search";
 import { syncInvoiceSupplierCodesForUser } from "@/lib/supplier-sync";
 import type { SerializedSupplier } from "@/types/supplier";
 
@@ -142,28 +143,32 @@ const SUPPLIERS_PAGE_SIZE = 25;
 export async function listSuppliersPageForUser(
   requestedPage: number,
   pageSize: number = SUPPLIERS_PAGE_SIZE,
+  searchQuery?: string | null,
 ): Promise<{
   suppliers: SerializedSupplier[];
   total: number;
   page: number;
   totalPages: number;
   pageSize: number;
+  searchQuery: string;
 }> {
   if (!isDatabaseConfigured()) {
-    return { suppliers: [], total: 0, page: 1, totalPages: 1, pageSize };
+    return { suppliers: [], total: 0, page: 1, totalPages: 1, pageSize, searchQuery: "" };
   }
   const session = await auth();
   if (!session?.user?.id) {
     redirect("/iniciar-sesion");
   }
   const userId = session.user.id;
-  const total = await prisma.supplier.count({ where: { userId } });
+  const search = searchQuery?.trim() ?? "";
+  const where = buildSupplierSearchWhere(userId, search);
+  const total = await prisma.supplier.count({ where });
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(Math.max(1, requestedPage), totalPages);
   const skip = (page - 1) * pageSize;
 
   const rows = await prisma.supplier.findMany({
-    where: { userId },
+    where,
     orderBy: { code: "asc" },
     skip,
     take: pageSize,
@@ -175,6 +180,7 @@ export async function listSuppliersPageForUser(
     page,
     totalPages,
     pageSize,
+    searchQuery: search,
   };
 }
 

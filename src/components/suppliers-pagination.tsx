@@ -1,23 +1,22 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import { proveedoresListUrl } from "@/lib/supplier-search";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-function hrefForPage(p: number): string {
-  return p <= 1 ? "/proveedores" : `/proveedores?page=${p}`;
-}
 
 export function SuppliersPagination({
   page,
   totalPages,
   total,
   pageSize,
+  searchQuery = "",
 }: {
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
+  searchQuery?: string;
 }) {
   if (total === 0) {
     return null;
@@ -48,7 +47,7 @@ export function SuppliersPagination({
         <div className="flex flex-wrap items-center gap-2">
           {page > 1 ? (
             <Link
-              href={hrefForPage(page - 1)}
+              href={proveedoresListUrl(page - 1, searchQuery)}
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1")}
             >
               <ChevronLeft className="size-4" />
@@ -67,7 +66,7 @@ export function SuppliersPagination({
           )}
           {page < totalPages ? (
             <Link
-              href={hrefForPage(page + 1)}
+              href={proveedoresListUrl(page + 1, searchQuery)}
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1")}
             >
               Siguiente

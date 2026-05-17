@@ -22,8 +22,7 @@ import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
 import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
 import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
-import { resolveSupplierFromMaestro } from "@/lib/supplier-match";
-import { findSupplierCodeForUserCuit } from "@/lib/supplier-sync";
+import { resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { uploadBuffer } from "@/lib/storage";
@@ -177,15 +176,14 @@ export async function uploadInvoice(formData: FormData) {
       );
     }
 
-    const resolved = await resolveSupplierFromMaestro(
+    const resolved = await resolveOrCreateInvoiceSupplier(
       userId,
       extracted.provider,
       extracted.cuit,
     );
     const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
     const providerCuit = resolved?.cuit ?? aiCuit;
-    const supplierCode =
-      resolved?.code ?? (await findSupplierCodeForUserCuit(userId, aiCuit));
+    const supplierCode = resolved?.code ?? null;
 
     let chartAccount =
       (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
@@ -248,6 +246,7 @@ export async function uploadInvoice(formData: FormData) {
   }
 
   revalidatePath("/history");
+  revalidatePath("/proveedores");
   revalidatePath(`/history/${invoice.id}`);
   redirect(`/history/${invoice.id}`);
 }
@@ -358,15 +357,13 @@ export async function updateInvoiceExtractedFields(
     throw e;
   }
 
-  const resolved = await resolveSupplierFromMaestro(
+  const resolved = await resolveOrCreateInvoiceSupplier(
     session.user.id,
     providerName,
     providerCuit,
   );
   const finalCuit = resolved?.cuit ?? providerCuit;
-  const supplierCode =
-    resolved?.code ??
-    (await findSupplierCodeForUserCuit(session.user.id, providerCuit));
+  const supplierCode = resolved?.code ?? null;
 
   const chartAccountCode = formText(formData.get("chartAccountCode"));
   let chartAccount = chartAccountCode
@@ -412,6 +409,7 @@ export async function updateInvoiceExtractedFields(
   });
 
   revalidatePath("/history");
+  revalidatePath("/proveedores");
   revalidatePath(`/history/${invoiceId}`);
   return { ok: true };
 }

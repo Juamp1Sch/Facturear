@@ -22,7 +22,13 @@ function cellText(v: string | null, empty = "—") {
   return v;
 }
 
-export function SuppliersTable({ suppliers }: { suppliers: SerializedSupplier[] }) {
+export function SuppliersTable({
+  suppliers,
+  searchQuery = "",
+}: {
+  suppliers: SerializedSupplier[];
+  searchQuery?: string;
+}) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState<SerializedSupplier | null>(null);
@@ -42,10 +48,12 @@ export function SuppliersTable({ suppliers }: { suppliers: SerializedSupplier[] 
   }, []);
 
   if (suppliers.length === 0) {
+    const q = searchQuery.trim();
     return (
       <p className="text-sm text-muted-foreground">
-        Todavía no tenés proveedores cargados. Usá la pestaña «Cargar proveedores» para importar el
-        maestro.
+        {q
+          ? `Ningún proveedor coincide con «${q}». Probá otro término o limpiá la búsqueda.`
+          : "Todavía no tenés proveedores cargados. Usá la pestaña «Cargar proveedores» para importar el maestro."}
       </p>
     );
   }

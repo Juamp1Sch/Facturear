@@ -250,7 +250,7 @@ export function InvoiceExtractedFields({
               <dd className="text-sm break-words">
                 {invoice.supplierCode ?? (
                   <span className="text-muted-foreground">
-                    Sin coincidencia en maestro (CUIT distinto o no importado)
+                    Sin proveedor (falta nombre o CUIT en la factura)
                   </span>
                 )}
               </dd>
