@@ -4,6 +4,7 @@ import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/auth";
+import { readStoredFile } from "@/lib/storage";
 
 const ROOT = path.join(process.cwd(), ".data", "uploads");
 
@@ -33,6 +34,16 @@ export async function GET(
     return new NextResponse("Forbidden", { status: 403 });
   }
 
+  const fromDb = await readStoredFile(key);
+  if (fromDb) {
+    return new NextResponse(new Uint8Array(fromDb.buffer), {
+      headers: {
+        "Content-Type": fromDb.contentType,
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
+
   const resolved = path.resolve(ROOT, key);
   const rootResolved = path.resolve(ROOT);
   if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
@@ -44,7 +55,7 @@ export async function GET(
   }
 
   const buffer = await readFile(resolved);
-  return new NextResponse(buffer, {
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": contentTypeForKey(key),
       "Cache-Control": "private, max-age=3600",
