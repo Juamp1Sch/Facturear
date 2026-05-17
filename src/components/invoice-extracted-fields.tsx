@@ -17,7 +17,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
+import type { DocumentKind } from "@/lib/comprobante-code";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
+
+const DOCUMENT_KIND_OPTIONS: { value: DocumentKind; label: string }[] = [
+  { value: "FACTURA", label: "Factura" },
+  { value: "NOTA_CREDITO", label: "Nota de crédito" },
+  { value: "NOTA_DEBITO", label: "Nota de débito" },
+];
+
+function documentKindLabel(kind: string | null): string {
+  const opt = DOCUMENT_KIND_OPTIONS.find((o) => o.value === kind);
+  return opt?.label ?? "—";
+}
 
 function amountInputDefault(value: string | null | undefined): string {
   if (value == null || value === "") return "";
@@ -70,6 +82,7 @@ export function InvoiceExtractedFields({
   }, []);
 
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
+  const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
 
   return (
     <Card>
@@ -117,6 +130,20 @@ export function InvoiceExtractedFields({
             }}
           >
             <input type="hidden" name="invoiceId" value={invoice.id} />
+
+            {invoice.movementId ? (
+              <div className="space-y-2">
+                <label htmlFor="movementId" className="text-sm font-medium">
+                  ID movimiento
+                </label>
+                <Input
+                  id="movementId"
+                  value={invoice.movementId}
+                  readOnly
+                  className="bg-muted"
+                />
+              </div>
+            ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
@@ -171,7 +198,7 @@ export function InvoiceExtractedFields({
               </div>
               <div className="space-y-2">
                 <label htmlFor="invoiceType" className="text-sm font-medium">
-                  Tipo
+                  Tipo (letra)
                 </label>
                 <Input
                   id="invoiceType"
@@ -179,6 +206,23 @@ export function InvoiceExtractedFields({
                   defaultValue={invoice.invoiceType ?? ""}
                   placeholder="A, B, C…"
                 />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="documentKind" className="text-sm font-medium">
+                  Tipo de documento
+                </label>
+                <select
+                  id="documentKind"
+                  name="documentKind"
+                  defaultValue={invoice.documentKind ?? "FACTURA"}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {DOCUMENT_KIND_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-2">
                 <label htmlFor="netAmount" className="text-sm font-medium">
@@ -233,10 +277,59 @@ export function InvoiceExtractedFields({
               </div>
             </div>
 
+            <div className="space-y-4 border-t border-border pt-4">
+              <div>
+                <h3 className="text-sm font-medium">Datos que debés completar</h3>
+                <p className="text-xs text-muted-foreground">
+                  Empresa y sucursal para el JSON contable de exportación.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label htmlFor="empresa" className="text-sm font-medium">
+                    Empresa
+                  </label>
+                  <Input
+                    id="empresa"
+                    name="empresa"
+                    defaultValue={invoice.empresa ?? ""}
+                    placeholder="Ej. 0001"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="sucursal" className="text-sm font-medium">
+                    Sucursal
+                  </label>
+                  <Input
+                    id="sucursal"
+                    name="sucursal"
+                    defaultValue={invoice.sucursal ?? ""}
+                    placeholder="Ej. 0001"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            </div>
+
             <EditFormActions onCancel={closeEdit} />
           </form>
         ) : (
-          <dl className="divide-y divide-border rounded-lg border border-border">
+          <>
+            {missingEmpresaSucursal ? (
+              <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+                Falta empresa y/o sucursal para exportar el JSON contable. Completalos
+                en Editar.
+              </div>
+            ) : null}
+
+            <dl className="divide-y divide-border rounded-lg border border-border">
+            {invoice.movementId ? (
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">ID movimiento</dt>
+                <dd className="font-mono text-sm break-all">{invoice.movementId}</dd>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Proveedor</dt>
               <dd className="text-sm break-words">{invoice.providerName ?? "—"}</dd>
@@ -264,8 +357,12 @@ export function InvoiceExtractedFields({
               <dd className="text-sm break-words">{invoice.invoiceNumber ?? "—"}</dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
-              <dt className="text-sm font-medium text-muted-foreground">Tipo</dt>
+              <dt className="text-sm font-medium text-muted-foreground">Tipo (letra)</dt>
               <dd className="text-sm">{invoice.invoiceType ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Tipo documento</dt>
+              <dd className="text-sm">{documentKindLabel(invoice.documentKind)}</dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Neto</dt>
@@ -292,6 +389,21 @@ export function InvoiceExtractedFields({
               </dd>
             </div>
           </dl>
+
+            <dl className="mt-4 divide-y divide-border rounded-lg border border-border">
+              <div className="bg-muted/30 px-3 py-2">
+                <p className="text-sm font-medium">Datos que debés completar</p>
+              </div>
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">Empresa</dt>
+                <dd className="text-sm">{invoice.empresa ?? "—"}</dd>
+              </div>
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">Sucursal</dt>
+                <dd className="text-sm">{invoice.sucursal ?? "—"}</dd>
+              </div>
+            </dl>
+          </>
         )}
       </CardContent>
     </Card>

@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { buildInvoiceJson } from "@/lib/invoice-json";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
 function isErrorPayload(
@@ -70,6 +71,8 @@ export function InvoiceDetail({
     payloadIsError,
   );
 
+  const contableJson = buildInvoiceJson(invoice);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -124,7 +127,21 @@ export function InvoiceDetail({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Respuesta IA (JSON)</CardTitle>
+          <CardTitle className="text-base">JSON contable</CardTitle>
+          <CardDescription>
+            Formato de exportación para el sistema contable destino.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs">
+            {JSON.stringify(contableJson, null, 2)}
+          </pre>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Respuesta IA cruda (debug)</CardTitle>
         </CardHeader>
         <CardContent>
           <details className="group">

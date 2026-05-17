@@ -25,6 +25,8 @@ import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
 import { resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
+import { buildMovementId } from "@/lib/movement-id";
+import { parseDocumentKind } from "@/lib/comprobante-code";
 import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -87,6 +89,20 @@ function resolveInvoiceMimeType(file: File, buffer: Buffer): string | null {
     if (fromName && ALLOWED.has(fromName)) return fromName;
   }
   return null;
+}
+
+async function allocateUniqueMovementId(
+  invoiceDate: Date | null,
+): Promise<string> {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const movementId = buildMovementId(invoiceDate);
+    const existing = await prisma.invoice.findUnique({
+      where: { movementId },
+      select: { id: true },
+    });
+    if (!existing) return movementId;
+  }
+  throw new Error("No se pudo generar un ID de movimiento único.");
 }
 
 function extForMime(mime: string): string {
@@ -189,6 +205,10 @@ export async function uploadInvoice(formData: FormData) {
       (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
       (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
 
+    const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
+    const movementId = await allocateUniqueMovementId(invoiceDate);
+    const documentKind = parseDocumentKind(extracted.document_kind);
+
     const aiPayloadOut: Record<string, unknown> = {
       ...(extracted as Record<string, unknown>),
     };
@@ -210,9 +230,11 @@ export async function uploadInvoice(formData: FormData) {
         providerName: extracted.provider,
         providerCuit,
         supplierCode,
+        movementId,
+        documentKind,
         invoiceNumber: extracted.invoice_number,
         invoiceType: extracted.invoice_type,
-        invoiceDate: parseAiInvoiceDate(extracted.invoice_date),
+        invoiceDate,
         netAmount:
           extracted.net_amount != null
             ? new Prisma.Decimal(extracted.net_amount)
@@ -339,6 +361,10 @@ export async function updateInvoiceExtractedFields(
 
   const invoiceNumber = formText(formData.get("invoiceNumber"));
   const invoiceType = formText(formData.get("invoiceType"));
+  const empresa = formText(formData.get("empresa"));
+  const sucursal = formText(formData.get("sucursal"));
+  const documentKindRaw = formText(formData.get("documentKind"));
+  const documentKind = parseDocumentKind(documentKindRaw);
 
   let netAmount: Prisma.Decimal | null;
   let vatAmount: Prisma.Decimal | null;
@@ -396,6 +422,9 @@ export async function updateInvoiceExtractedFields(
       providerName,
       providerCuit: finalCuit,
       supplierCode,
+      empresa,
+      sucursal,
+      documentKind,
       invoiceNumber,
       invoiceType,
       invoiceDate,

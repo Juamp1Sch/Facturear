@@ -21,6 +21,12 @@ export const invoiceExtractionSchema = z.object({
     .string()
     .nullable()
     .describe("Tipo de comprobante AFIP: A, B, C, M, E, etc."),
+  document_kind: z
+    .enum(["FACTURA", "NOTA_CREDITO", "NOTA_DEBITO"])
+    .nullable()
+    .describe(
+      "Tipo de documento: FACTURA, NOTA_CREDITO o NOTA_DEBITO según el encabezado del comprobante",
+    ),
   net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
   vat_amount: z.number().nullable().describe("Importe de IVA"),
   total_amount: z.number().nullable().describe("Importe total"),
