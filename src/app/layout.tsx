@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Facturear — Facturas de proveedores",
+  title: "AgileScan - Lector de facturas",
   description:
     "Subí facturas (PDF o foto): visión OpenAI en fotos, texto en PDF y extracción con IA.",
 };

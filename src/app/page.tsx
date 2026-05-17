@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 export default function LandingPage() {
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex w-full flex-1 flex-col">
       <section className="border-b border-border bg-gradient-to-b from-secondary/80 to-background px-4 py-16 sm:py-24">
         <div className="mx-auto max-w-3xl text-center">
           <p className="mb-3 text-sm font-medium uppercase tracking-wide text-brand-section">
@@ -16,7 +16,7 @@ export default function LandingPage() {
             Subí, extraé y organizá tus facturas con IA
           </h1>
           <p className="mx-auto mb-8 max-w-xl text-lg text-muted-foreground">
-            Facturear lee PDFs y fotos, completa los datos clave y te deja un historial
+            AgileScan lee PDFs y fotos, completa los datos clave y te deja un historial
             propio: cada usuario ve solo lo suyo.
           </p>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">

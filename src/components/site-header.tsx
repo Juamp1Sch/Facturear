@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { auth } from "@/auth";
@@ -12,22 +13,25 @@ export async function SiteHeader() {
 
   return (
     <header className="w-full border-b border-border bg-muted/40">
-      <div className="relative mx-auto flex h-14 w-full items-center justify-between px-4 sm:px-6 lg:px-10">
+      <div className="relative mx-auto flex h-16 w-full items-center justify-between px-4 sm:h-[4.75rem] sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-2 md:flex-1">
           <SiteMobileNav loggedIn={loggedIn} />
         </div>
 
         <Link
           href={loggedIn ? "/upload" : "/"}
-          className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-lg font-semibold tracking-tight text-brand-subsection"
+          className="absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2"
+          aria-label="AgileScan"
         >
-          <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-brand-logo text-sm font-bold text-white shadow-sm"
-            aria-hidden
-          >
-            F
-          </span>
-          <span className="whitespace-nowrap">Facturear</span>
+          <Image
+            src="/brand/logo-header.png"
+            alt=""
+            width={1600}
+            height={780}
+            unoptimized
+            className="h-14 w-auto max-w-[min(100vw-4rem,28rem)] shrink-0 object-contain sm:h-16 sm:max-w-[32rem]"
+            priority
+          />
         </Link>
 
         <nav

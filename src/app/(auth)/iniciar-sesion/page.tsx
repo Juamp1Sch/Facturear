@@ -1,8 +1,8 @@
 import { LoginForm } from "@/components/login-form";
 
 export const metadata = {
-  title: "Iniciar sesión — Facturear",
-  description: "Accedé a tu cuenta de Facturear.",
+  title: "Iniciar sesión — AgileScan",
+  description: "Accedé a tu cuenta de AgileScan.",
 };
 
 export default function IniciarSesionPage() {

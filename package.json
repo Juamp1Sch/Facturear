@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
-    "auth:secret": "node -e \"console.log('AUTH_SECRET=' + require('crypto').randomBytes(32).toString('base64'))\""
+    "auth:secret": "node -e \"console.log('AUTH_SECRET=' + require('crypto').randomBytes(32).toString('base64'))\"",
+    "icons:generate": "node scripts/generate-favicon.mjs",
+    "prebuild": "npm run icons:generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

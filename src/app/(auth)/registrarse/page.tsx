@@ -1,8 +1,8 @@
 import { RegisterForm } from "@/components/register-form";
 
 export const metadata = {
-  title: "Registrarse — Facturear",
-  description: "Creá tu cuenta en Facturear.",
+  title: "Registrarse — AgileScan",
+  description: "Creá tu cuenta en AgileScan.",
 };
 
 export default function RegistrarsePage() {
