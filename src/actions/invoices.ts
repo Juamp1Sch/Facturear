@@ -17,6 +17,7 @@ import {
   validateArgentineCuitForEntry,
 } from "@/lib/cuit-argentina";
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
+import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
 import { prisma } from "@/lib/db";
 import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
@@ -232,7 +233,9 @@ export async function uploadInvoice(formData: FormData) {
         supplierCode,
         movementId,
         documentKind,
-        invoiceNumber: extracted.invoice_number,
+        invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(
+          extracted.invoice_number,
+        ),
         invoiceType: extracted.invoice_type,
         invoiceDate,
         netAmount:
@@ -359,7 +362,9 @@ export async function updateInvoiceExtractedFields(
     }
   }
 
-  const invoiceNumber = formText(formData.get("invoiceNumber"));
+  const invoiceNumber = normalizeNumeroComprobanteFromAiOrNull(
+    formText(formData.get("invoiceNumber")),
+  );
   const invoiceType = formText(formData.get("invoiceType"));
   const empresa = formText(formData.get("empresa"));
   const sucursal = formText(formData.get("sucursal"));

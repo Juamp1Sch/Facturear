@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { InvoiceDocumentPreview } from "@/components/invoice-document-preview";
 import { InvoiceExtractedFields } from "@/components/invoice-extracted-fields";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -105,20 +106,10 @@ export function InvoiceDetail({
             <CardDescription>{invoice.mimeType}</CardDescription>
           </CardHeader>
           <CardContent className="min-h-[320px] p-3 sm:p-6">
-            {invoice.mimeType === "application/pdf" ? (
-              <iframe
-                title="Factura PDF"
-                src={previewUrl}
-                className="h-[60vh] min-h-[320px] w-full rounded-md border border-border sm:h-[480px]"
-              />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewUrl}
-                alt="Factura"
-                className="max-h-[60vh] w-full rounded-md border border-border object-contain sm:max-h-[480px]"
-              />
-            )}
+            <InvoiceDocumentPreview
+              mimeType={invoice.mimeType}
+              previewUrl={previewUrl}
+            />
           </CardContent>
         </Card>
 
