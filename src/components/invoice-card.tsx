@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatCreatedAtDateArgentina } from "@/lib/history-search";
 import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import type { SerializedInvoiceListItem } from "@/types/invoice";
@@ -29,7 +30,8 @@ function statusVariant(
 
 export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem }) {
   const title = invoice.providerName?.trim() || "Proveedor desconocido";
-  const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
+  const emissionStr = formatInvoiceCalendarDate(invoice.invoiceDate);
+  const uploadedStr = formatCreatedAtDateArgentina(invoice.createdAt);
 
   return (
     <Link href={`/history/${invoice.id}`}>
@@ -41,13 +43,17 @@ export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem })
               {statusLabel[invoice.status] ?? invoice.status}
             </Badge>
           </div>
-          <CardDescription className="line-clamp-1">
+          <CardDescription className="line-clamp-2">
             {invoice.providerCuit ?? "CUIT —"} ·{" "}
             {invoice.supplierCode ? `Cód. ${invoice.supplierCode} · ` : null}
-            {dateStr}
+            Emisión: {emissionStr}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
+          <p className="text-muted-foreground">
+            Fecha de carga:{" "}
+            <span className="text-foreground">{uploadedStr}</span>
+          </p>
           <p>
             <span className="text-muted-foreground">Total:</span>{" "}
             <span className="font-medium">

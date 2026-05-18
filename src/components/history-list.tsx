@@ -1,73 +1,70 @@
-"use client";
-
-import { useMemo, useState } from "react";
-
 import { HistoryPagination } from "@/components/history-pagination";
+import { HistoryToolbar } from "@/components/history-toolbar";
 import { InvoiceCard } from "@/components/invoice-card";
-import { Input } from "@/components/ui/input";
+import { formatHistoryDateParamDisplay } from "@/lib/history-search";
 import type { SerializedInvoiceListItem } from "@/types/invoice";
-
-function matchesSearch(inv: SerializedInvoiceListItem, needle: string) {
-  const hay = [
-    inv.providerName,
-    inv.providerCuit,
-    inv.invoiceNumber,
-    inv.supplierCode,
-    inv.chartAccount?.name,
-    inv.chartAccount?.code,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return hay.includes(needle);
-}
 
 export function HistoryList({
   invoices,
-  searchPool,
   page,
   totalPages,
   total,
   pageSize,
+  searchQuery,
+  from,
+  to,
+  hasFilters,
 }: {
   invoices: SerializedInvoiceListItem[];
-  searchPool: SerializedInvoiceListItem[];
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
+  searchQuery: string;
+  from: string;
+  to: string;
+  hasFilters: boolean;
 }) {
-  const [q, setQ] = useState("");
-  const searching = q.trim().length > 0;
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return invoices;
-    return searchPool.filter((inv) => matchesSearch(inv, needle));
-  }, [invoices, searchPool, q]);
+  const fromDisplay = from ? formatHistoryDateParamDisplay(from) : "";
+  const toDisplay = to ? formatHistoryDateParamDisplay(to) : "";
 
   return (
     <div className="space-y-4">
-      <Input
-        placeholder="Buscar por proveedor, CUIT o cuenta…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        className="max-w-md"
+      <HistoryToolbar
+        initialQuery={searchQuery}
+        initialFrom={from}
+        initialTo={to}
+        total={total}
       />
 
-      {searching ? (
+      {hasFilters ? (
         <p className="text-xs text-muted-foreground">
-          Buscando en tus {searchPool.length} facturas más recientes (sin paginación).
+          {total === 0
+            ? "Sin resultados"
+            : total === 1
+              ? "1 factura encontrada"
+              : `${total} facturas encontradas`}
+          {searchQuery ? ` para «${searchQuery}»` : null}
+          {from || to
+            ? ` · carga${
+                from && to
+                  ? ` del ${fromDisplay} al ${toDisplay}`
+                  : from
+                    ? ` desde ${fromDisplay}`
+                    : ` hasta ${toDisplay}`
+              }`
+            : null}
+          .
         </p>
       ) : null}
 
-      {filtered.length === 0 ? (
+      {invoices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No hay facturas que coincidan.
         </p>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
-          {filtered.map((inv) => (
+          {invoices.map((inv) => (
             <li key={inv.id}>
               <InvoiceCard invoice={inv} />
             </li>
@@ -75,14 +72,15 @@ export function HistoryList({
         </ul>
       )}
 
-      {!searching ? (
-        <HistoryPagination
-          page={page}
-          totalPages={totalPages}
-          total={total}
-          pageSize={pageSize}
-        />
-      ) : null}
+      <HistoryPagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={pageSize}
+        searchQuery={searchQuery}
+        from={from}
+        to={to}
+      />
     </div>
   );
 }
