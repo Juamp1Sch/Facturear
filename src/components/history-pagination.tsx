@@ -2,29 +2,41 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
+import { historyListUrl } from "@/lib/history-search";
 import { cn } from "@/lib/utils";
-
-function hrefForPage(p: number): string {
-  return p <= 1 ? "/history" : `/history?page=${p}`;
-}
 
 export function HistoryPagination({
   page,
   totalPages,
   total,
   pageSize,
+  searchQuery,
+  from,
+  to,
 }: {
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
+  searchQuery: string;
+  from: string;
+  to: string;
 }) {
   if (total === 0) {
     return null;
   }
 
-  const from = (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
+  const fromInv = (page - 1) * pageSize + 1;
+  const toInv = Math.min(page * pageSize, total);
+
+  function hrefForPage(p: number): string {
+    return historyListUrl({
+      page: p,
+      q: searchQuery || undefined,
+      from: from || undefined,
+      to: to || undefined,
+    });
+  }
 
   return (
     <nav
@@ -32,8 +44,8 @@ export function HistoryPagination({
       aria-label="Paginación del historial"
     >
       <p className="text-sm text-muted-foreground">
-        Mostrando <span className="font-medium text-foreground">{from}</span>–
-        <span className="font-medium text-foreground">{to}</span> de{" "}
+        Mostrando <span className="font-medium text-foreground">{fromInv}</span>–
+        <span className="font-medium text-foreground">{toInv}</span> de{" "}
         <span className="font-medium text-foreground">{total}</span>
         {totalPages > 1 ? (
           <>
