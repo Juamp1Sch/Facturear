@@ -194,7 +194,11 @@ export function InvoiceExtractedFields({
                   id="invoiceNumber"
                   name="invoiceNumber"
                   defaultValue={invoice.invoiceNumber ?? ""}
+                  placeholder="00004-00059991"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Punto de venta y número (ej. 00004-00059991).
+                </p>
               </div>
               <div className="space-y-2">
                 <label htmlFor="invoiceType" className="text-sm font-medium">

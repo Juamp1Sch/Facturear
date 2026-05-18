@@ -12,6 +12,7 @@ export type InvoiceExtractOptions = {
 
 const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay varios totales, elegí el total final a pagar.
 - CUIT del EMISOR (campo "cuit"): SOLO el de la CABECERA / membrete / bloque fiscal del PROVEEDOR (arriba del documento, junto al nombre del emisor). Contá exactamente 11 dígitos y devolvé XX-XXXXXXXX-X. NUNCA uses el CUIT del cliente, destinatario, alumno ni el del cuerpo bajo "Consumidor final". Si hay dos CUITs, siempre el del encabezado del emisor. Si en cabecera se leen 11 dígitos claros (aunque haya otro CUIT abajo), devolvé esos 11 dígitos formateados: NO uses null solo por dudar del dígito verificador AFIP ni por existencia de otro CUIT en el cuerpo.
+- invoice_number: si el encabezado AFIP muestra "Punto de Venta" / "Punto de Vta" y "Número" / "Comp. Nro" (típicamente arriba a la derecha, junto a FACTURA A/B/C), combiná ambos en NNNNN-NNNNNNNN (5 dígitos PV + guion + 8 dígitos número, con ceros a la izquierda; ej. PV 00004 y Nro 00059991 → 00004-00059991). No confundir con CAE, OC, códigos de ítem ni número de cliente. Si solo hay un número sin punto de venta, devolvé ese valor sin inventar PV.
 - Fecha: ISO YYYY-MM-DD.
 - invoice_type: letra del comprobante (A, B, C, M, E) si aparece.
 - document_kind: si el encabezado dice "FACTURA" o es factura común → "FACTURA"; "NOTA DE CRÉDITO" / "NOTA DE CREDITO" → "NOTA_CREDITO"; "NOTA DE DÉBITO" / "NOTA DE DEBITO" → "NOTA_DEBITO". Si no es claro, null (se asume factura).
@@ -55,7 +56,7 @@ export async function extractInvoiceData(
       { role: "system", content: systemContent },
       {
         role: "user",
-        content: `Texto OCR de la factura. Para "cuit" usá solo el CUIT del EMISOR en cabecera/membrete (11 dígitos); ignorá CUITs de cliente o receptor en el cuerpo del texto.\n\n${trimmed}`,
+        content: `Texto OCR de la factura. Para "cuit" usá solo el CUIT del EMISOR en cabecera/membrete (11 dígitos); ignorá CUITs de cliente o receptor en el cuerpo del texto. Para "invoice_number", si hay Punto de Venta y Número en cabecera, devolvé NNNNN-NNNNNNNN (ej. 00004-00059991).\n\n${trimmed}`,
       },
     ],
     response_format: zodResponseFormat(
@@ -89,7 +90,7 @@ export async function extractInvoiceDataFromImage(
         content: [
           {
             type: "text",
-            text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento.",
+            text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991).",
           },
           {
             type: "image_url",

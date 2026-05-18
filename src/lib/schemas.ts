@@ -16,7 +16,12 @@ export const invoiceExtractionSchema = z.object({
     .string()
     .nullable()
     .describe("Fecha de emisión del comprobante (recuadro FECHA), ISO YYYY-MM-DD"),
-  invoice_number: z.string().nullable().describe("Número de comprobante si aparece"),
+  invoice_number: z
+    .string()
+    .nullable()
+    .describe(
+      "Número de comprobante AFIP. Si en cabecera (recuadro superior derecho, junto a FACTURA A/B/C) aparecen Punto de Venta y Número por separado, devolvé UN solo string NNNNN-NNNNNNNN: 5 dígitos de punto de venta + guion + 8 dígitos de número, con ceros a la izquierda (ej. PV 4 y Nro 59991 → 00004-00059991). Si solo hay un número sin punto de venta, devolvé ese valor legible sin inventar PV. No uses CAE, OC, códigos de ítem ni números de cliente.",
+    ),
   invoice_type: z
     .string()
     .nullable()
