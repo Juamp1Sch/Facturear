@@ -1,10 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { isApiConfiguredForUser } from "@/actions/api-config";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { InvoiceDetail } from "@/components/invoice-detail";
 import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { resolveTaxChartAccountsForUser } from "@/lib/tax-chart-account";
 import { getSignedReadUrl } from "@/lib/storage";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
@@ -43,7 +45,11 @@ export default async function InvoiceDetailPage({
 
   if (!invoice) notFound();
 
-  const previewUrl = await getSignedReadUrl(invoice.originalFileKey);
+  const [previewUrl, taxChartAccounts, apiConfigured] = await Promise.all([
+    getSignedReadUrl(invoice.originalFileKey),
+    resolveTaxChartAccountsForUser(session.user.id),
+    isApiConfiguredForUser(session.user.id),
+  ]);
   const data = JSON.parse(JSON.stringify(invoice)) as SerializedInvoiceDetail;
 
   return (
@@ -53,8 +59,10 @@ export default async function InvoiceDetailPage({
       </h1>
       <InvoiceDetail
         invoice={data}
+        taxChartAccounts={taxChartAccounts}
         previewUrl={previewUrl}
         showErrorBanner={query.error === "1"}
+        apiConfigured={apiConfigured}
       />
     </main>
   );

@@ -253,6 +253,18 @@ export function InvoiceExtractedFields({
                 />
               </div>
               <div className="space-y-2">
+                <label htmlFor="perceptionsAmount" className="text-sm font-medium">
+                  Percepciones
+                </label>
+                <Input
+                  id="perceptionsAmount"
+                  name="perceptionsAmount"
+                  defaultValue={amountInputDefault(invoice.perceptionsAmount)}
+                  inputMode="decimal"
+                  placeholder="0 o 1234,56"
+                />
+              </div>
+              <div className="space-y-2">
                 <label htmlFor="totalAmount" className="text-sm font-medium">
                   Total
                 </label>
@@ -375,6 +387,10 @@ export function InvoiceExtractedFields({
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">IVA</dt>
               <dd className="text-sm">{formatMoney(invoice.vatAmount)}</dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Percepciones</dt>
+              <dd className="text-sm">{formatMoney(invoice.perceptionsAmount)}</dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Total</dt>

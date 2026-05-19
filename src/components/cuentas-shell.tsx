@@ -13,6 +13,7 @@ export function CuentasShell({ children }: { children: React.ReactNode }) {
   const onMis = pathname === "/cuentas" || pathname === "/cuentas/";
   const onCarga = pathname.startsWith("/carga-cuentas");
   const onAsociar = pathname.startsWith("/cuentas/asociar-proveedores");
+  const onImpuestos = pathname.startsWith("/cuentas/asociar-impuestos");
 
   return (
     <div className="w-full min-w-0 space-y-6">
@@ -67,6 +68,21 @@ export function CuentasShell({ children }: { children: React.ReactNode }) {
           )}
         >
           Asociar proveedores
+        </Link>
+        <Link
+          href="/cuentas/asociar-impuestos"
+          role="tab"
+          aria-selected={onImpuestos}
+          aria-current={onImpuestos ? "page" : undefined}
+          className={cn(
+            tabClass,
+            "shrink-0 whitespace-nowrap",
+            onImpuestos
+              ? "border-border border-b-transparent bg-background text-foreground"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+        >
+          Asociar impuestos
         </Link>
       </div>
 

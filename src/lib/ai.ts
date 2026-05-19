@@ -17,6 +17,11 @@ const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay var
 - invoice_type: letra del comprobante (A, B, C, M, E) si aparece.
 - document_kind: si el encabezado dice "FACTURA" o es factura común → "FACTURA"; "NOTA DE CRÉDITO" / "NOTA DE CREDITO" → "NOTA_CREDITO"; "NOTA DE DÉBITO" / "NOTA DE DEBITO" → "NOTA_DEBITO". Si no es claro, null (se asume factura).
 - chart_account_code: si se incluye el plan de cuentas del usuario, elegí el código de la cuenta (efectivo, banco, mercado pago, etc.) que corresponda al medio de pago o imputación visible en la factura; si no hay plan o no hay señal, null.
+- Desglose fiscal (pie de factura / tabla de impuestos / totales): leé cada renglón por separado.
+- vat_lines: cada fila de IVA con label (ej. "IVA 21%", "IVA 10,5%") y amount. Si hay un solo importe de IVA, un solo elemento. null si no hay IVA.
+- vat_amount: suma de los amount de vat_lines, o el único importe de IVA si no hay desglose.
+- perception_lines: cada percepción impositiva con label (ej. "Percepción IIBB", "Per. IVA") y amount. null si no hay percepciones.
+- perceptions_amount: suma de los amount de perception_lines, o el total de percepciones si no hay desglose.
 Para el resto de campos: si un dato no está en el texto o no es legible en la imagen, devolvé null. Para "cuit", solo null si en la cabecera del emisor no hay ningún CUIT legible. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
 
 const SYSTEM_PROMPT_TEXT = `Sos un asistente contable para Argentina. A partir del texto OCR de una factura de proveedor, extraé campos estructurados.
