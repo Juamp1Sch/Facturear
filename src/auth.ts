@@ -53,6 +53,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.passwordHash,
         );
         if (!ok) return null;
+        if (!user.emailVerifiedAt) return null;
 
         return { id: user.id, email: user.email, name: user.name };
       },

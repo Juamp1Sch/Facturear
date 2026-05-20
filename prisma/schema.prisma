@@ -12,6 +12,11 @@ model User {
   name          String
   email         String         @unique
   passwordHash  String?        @map("password_hash")
+  emailVerifiedAt              DateTime? @map("email_verified_at")
+  verificationTokenHash        String?   @map("verification_token_hash")
+  verificationTokenExpiresAt   DateTime? @map("verification_token_expires_at")
+  passwordResetTokenHash       String?   @map("password_reset_token_hash")
+  passwordResetTokenExpiresAt  DateTime? @map("password_reset_token_expires_at")
   invoices      Invoice[]
   suppliers     Supplier[]
   chartAccounts         ChartAccount[]

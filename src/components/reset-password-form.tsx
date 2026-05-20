@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { login } from "@/actions/auth";
+import { resetPassword } from "@/actions/auth";
+import { passwordRulesMessage } from "@/lib/auth-schemas";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,52 +17,40 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-function SubmitButton({ label }: { label: string }) {
+function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" className="w-full" disabled={pending}>
-      {pending ? "Ingresando…" : label}
+      {pending ? "Guardando…" : "Restablecer contraseña"}
     </Button>
   );
 }
 
-export function LoginForm() {
-  const searchParams = useSearchParams();
-  const activated = searchParams.get("activada") === "1";
-  const passwordReset = searchParams.get("contrasena") === "1";
-  const [state, action] = useActionState(login, undefined);
+export function ResetPasswordForm() {
+  const [state, action] = useActionState(resetPassword, undefined);
 
   return (
     <Card className="mx-auto w-full max-w-md">
       <CardHeader>
-        <CardTitle>Iniciar sesión</CardTitle>
+        <CardTitle>Nueva contraseña</CardTitle>
         <CardDescription>
-          Ingresá con tu email y contraseña para ver tu historial y cargar facturas.
+          Ingresá tu email, el código que te dio el administrador y tu nueva
+          contraseña. El código vence a las 12 horas.
         </CardDescription>
       </CardHeader>
       <form action={action} className="contents">
         <CardContent className="space-y-4">
-          {activated ? (
-            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-              Cuenta activada. Ya podés iniciar sesión.
-            </p>
-          ) : null}
-          {passwordReset ? (
-            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-              Contraseña actualizada. Ya podés iniciar sesión.
-            </p>
-          ) : null}
           {state?.message ? (
             <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {state.message}
-              {state.pendingActivation ? (
+              {state.message.includes("expiró") ? (
                 <>
                   {" "}
                   <Link
-                    href="/verificar-cuenta"
+                    href="/restablecer-contrasena"
                     className="font-medium underline underline-offset-4"
                   >
-                    Activar cuenta
+                    Solicitar código nuevo
                   </Link>
                 </>
               ) : null}
@@ -85,49 +73,77 @@ export function LoginForm() {
             ) : null}
           </div>
           <div className="space-y-2">
+            <label htmlFor="token" className="text-sm font-medium">
+              Código de restablecimiento
+            </label>
+            <Input
+              id="token"
+              name="token"
+              type="text"
+              autoComplete="off"
+              required
+              aria-invalid={Boolean(state?.errors?.token)}
+            />
+            {state?.errors?.token?.[0] ? (
+              <p className="text-sm text-destructive">{state.errors.token[0]}</p>
+            ) : null}
+          </div>
+          <div className="space-y-2">
             <label htmlFor="password" className="text-sm font-medium">
-              Contraseña
+              Nueva contraseña
             </label>
             <Input
               id="password"
               name="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
               required
+              minLength={8}
               aria-invalid={Boolean(state?.errors?.password)}
             />
             {state?.errors?.password?.[0] ? (
               <p className="text-sm text-destructive">{state.errors.password[0]}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{passwordRulesMessage}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="confirmPassword" className="text-sm font-medium">
+              Repetir contraseña
+            </label>
+            <Input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              aria-invalid={Boolean(state?.errors?.confirmPassword)}
+            />
+            {state?.errors?.confirmPassword?.[0] ? (
+              <p className="text-sm text-destructive">
+                {state.errors.confirmPassword[0]}
+              </p>
             ) : null}
           </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-4">
-          <SubmitButton label="Iniciar sesión" />
+          <SubmitButton />
           <p className="text-center text-sm text-muted-foreground">
-            ¿No tenés cuenta?{" "}
-            <Link
-              href="/registrarse"
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              Registrate
-            </Link>
-          </p>
-          <p className="text-center text-sm text-muted-foreground">
-            ¿Olvidaste tu contraseña?{" "}
+            ¿No tenés código?{" "}
             <Link
               href="/restablecer-contrasena"
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              Restablecela
+              Solicitar uno
             </Link>
           </p>
           <p className="text-center text-sm text-muted-foreground">
-            ¿Tenés código de activación?{" "}
             <Link
-              href="/verificar-cuenta"
+              href="/iniciar-sesion"
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              Activar cuenta
+              Volver a iniciar sesión
             </Link>
           </p>
         </CardFooter>
