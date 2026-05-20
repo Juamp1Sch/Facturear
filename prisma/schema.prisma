@@ -16,7 +16,10 @@ model User {
   suppliers     Supplier[]
   chartAccounts         ChartAccount[]
   supplierChartAccounts SupplierChartAccountLink[]
+  taxChartAccountSettings TaxChartAccountSettings?
+  taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
   storedFiles           StoredFile[]
+  integrationConfig     IntegrationConfig?
   createdAt             DateTime                   @default(now()) @map("created_at")
 }
 
@@ -48,6 +51,7 @@ model Invoice {
   invoiceDate         DateTime?          @map("invoice_date")
   netAmount           Decimal?           @map("net_amount") @db.Decimal(14, 2)
   vatAmount           Decimal?           @map("vat_amount") @db.Decimal(14, 2)
+  perceptionsAmount   Decimal?           @map("perceptions_amount") @db.Decimal(14, 2)
   totalAmount         Decimal?           @map("total_amount") @db.Decimal(14, 2)
   accountingAccountId String?            @map("accounting_account_id")
   accountingAccount   AccountingAccount? @relation(fields: [accountingAccountId], references: [id])
@@ -60,6 +64,9 @@ model Invoice {
   status              InvoiceStatus      @default(PROCESSING)
   aiConfidence        Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")
+  destinationUploadedAt   DateTime? @map("destination_uploaded_at")
+  destinationUploadStatus Int?      @map("destination_upload_status")
+  destinationUploadBody   String?   @map("destination_upload_body") @db.Text
   createdAt           DateTime           @default(now()) @map("created_at")
   corrections         Correction[]
 }
@@ -116,11 +123,37 @@ model ChartAccount {
   active        Boolean                    @default(true)
   invoices      Invoice[]
   supplierLinks SupplierChartAccountLink[]
+  vatTaxSettings                TaxChartAccountSettings[]           @relation("VatChartAccount")
+  taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
   createdAt     DateTime                   @default(now()) @map("created_at")
   updatedAt     DateTime                   @updatedAt @map("updated_at")
 
   @@unique([userId, code])
   @@map("chart_accounts")
+}
+
+model TaxChartAccountSettings {
+  id                String        @id @default(cuid())
+  userId            String        @unique @map("user_id")
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vatChartAccountId String?       @map("vat_chart_account_id")
+  vatChartAccount   ChartAccount? @relation("VatChartAccount", fields: [vatChartAccountId], references: [id], onDelete: SetNull)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@map("tax_chart_account_settings")
+}
+
+model TaxChartAccountPerceptionLink {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chartAccountId String       @map("chart_account_id")
+  chartAccount   ChartAccount @relation(fields: [chartAccountId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@unique([userId, chartAccountId])
+  @@map("tax_chart_account_perception_links")
 }
 
 model SupplierChartAccountLink {
@@ -136,4 +169,17 @@ model SupplierChartAccountLink {
 
   @@unique([userId, supplierId])
   @@map("supplier_chart_account_links")
+}
+
+model IntegrationConfig {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  String   @default("EXTERNAL")
+  apiUrl    String   @map("api_url")
+  userToken String   @map("user_token") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("integration_configs")
 }

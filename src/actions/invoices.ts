@@ -27,6 +27,7 @@ import { resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
+import { sumTaxLines } from "@/lib/tax-breakdown";
 import { parseDocumentKind } from "@/lib/comprobante-code";
 import { uploadBuffer } from "@/lib/storage";
 
@@ -210,6 +211,13 @@ export async function uploadInvoice(formData: FormData) {
     const movementId = await allocateUniqueMovementId(invoiceDate);
     const documentKind = parseDocumentKind(extracted.document_kind);
 
+    const vatFromLines = sumTaxLines(extracted.vat_lines);
+    const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
+    const vatAmount =
+      vatFromLines ?? extracted.vat_amount;
+    const perceptionsAmount =
+      perceptionsFromLines ?? extracted.perceptions_amount;
+
     const aiPayloadOut: Record<string, unknown> = {
       ...(extracted as Record<string, unknown>),
     };
@@ -243,8 +251,10 @@ export async function uploadInvoice(formData: FormData) {
             ? new Prisma.Decimal(extracted.net_amount)
             : null,
         vatAmount:
-          extracted.vat_amount != null
-            ? new Prisma.Decimal(extracted.vat_amount)
+          vatAmount != null ? new Prisma.Decimal(vatAmount) : null,
+        perceptionsAmount:
+          perceptionsAmount != null
+            ? new Prisma.Decimal(perceptionsAmount)
             : null,
         totalAmount:
           extracted.total_amount != null
@@ -373,10 +383,12 @@ export async function updateInvoiceExtractedFields(
 
   let netAmount: Prisma.Decimal | null;
   let vatAmount: Prisma.Decimal | null;
+  let perceptionsAmount: Prisma.Decimal | null;
   let totalAmount: Prisma.Decimal | null;
   try {
     netAmount = parseMoneyFromForm(formData.get("netAmount"));
     vatAmount = parseMoneyFromForm(formData.get("vatAmount"));
+    perceptionsAmount = parseMoneyFromForm(formData.get("perceptionsAmount"));
     totalAmount = parseMoneyFromForm(formData.get("totalAmount"));
   } catch (e) {
     if (e instanceof Error && e.message === "MONTO_INVALIDO") {
@@ -435,6 +447,7 @@ export async function updateInvoiceExtractedFields(
       invoiceDate,
       netAmount,
       vatAmount,
+      perceptionsAmount,
       totalAmount,
       chartAccountId: chartAccount?.id ?? null,
       aiPayload: nextPayload as object,

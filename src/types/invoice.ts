@@ -25,6 +25,7 @@ export type SerializedInvoiceListItem = {
   totalAmount: string | null;
   netAmount: string | null;
   vatAmount: string | null;
+  perceptionsAmount: string | null;
   supplierCode: string | null;
   movementId: string | null;
   empresa: string | null;
@@ -34,6 +35,7 @@ export type SerializedInvoiceListItem = {
   mimeType: string;
   accountingAccount: SerializedAccountingAccount | null;
   chartAccount: SerializedChartAccount | null;
+  destinationUploadedAt: string | null;
 };
 
 export type SerializedInvoiceDetail = SerializedInvoiceListItem & {

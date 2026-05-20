@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { InvoiceDocumentPreview } from "@/components/invoice-document-preview";
 import { InvoiceExtractedFields } from "@/components/invoice-extracted-fields";
+import { InvoiceUploadButton } from "@/components/invoice-upload-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -11,6 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildInvoiceJson } from "@/lib/invoice-json";
+import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
 function isErrorPayload(
@@ -51,12 +54,16 @@ function mergeMaestroIntoAiJson(
 
 export function InvoiceDetail({
   invoice,
+  taxChartAccounts,
   previewUrl,
   showErrorBanner,
+  apiConfigured,
 }: {
   invoice: SerializedInvoiceDetail;
+  taxChartAccounts: ResolvedTaxChartAccounts;
   previewUrl: string;
   showErrorBanner: boolean;
+  apiConfigured: boolean;
 }) {
   const err =
     showErrorBanner && isErrorPayload(invoice.aiPayload)
@@ -72,7 +79,34 @@ export function InvoiceDetail({
     payloadIsError,
   );
 
-  const contableJson = buildInvoiceJson(invoice);
+  const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+
+  const contableJson = buildInvoiceJson({
+    movementId: invoice.movementId,
+    empresa: invoice.empresa,
+    sucursal: invoice.sucursal,
+    supplierCode: invoice.supplierCode,
+    invoiceDate: invoice.invoiceDate,
+    invoiceType: invoice.invoiceType,
+    documentKind: invoice.documentKind,
+    invoiceNumber: invoice.invoiceNumber,
+    netAmount: invoice.netAmount,
+    vatAmount: invoice.vatAmount,
+    vatLines: taxBreakdown.vatLines,
+    perceptionsAmount: invoice.perceptionsAmount,
+    perceptionLines: taxBreakdown.perceptionLines,
+    totalAmount: invoice.totalAmount,
+    chartAccount: invoice.chartAccount,
+    vatChartAccountCode: taxChartAccounts.vatAccountCode,
+    perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+  });
+
+  const uploadDisabledReason =
+    invoice.status === "PROCESSING"
+      ? "La factura aún se está procesando."
+      : invoice.status === "ERROR"
+        ? "Corregí los datos de la factura antes de cargarla."
+        : null;
 
   return (
     <div className="space-y-6">
@@ -120,10 +154,16 @@ export function InvoiceDetail({
         <CardHeader>
           <CardTitle className="text-base">JSON contable</CardTitle>
           <CardDescription>
-            Formato de exportación para el sistema contable destino.
+            Formato de exportación para tu sistema de destino.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <InvoiceUploadButton
+            invoiceId={invoice.id}
+            apiConfigured={apiConfigured}
+            destinationUploadedAt={invoice.destinationUploadedAt}
+            disabledReason={uploadDisabledReason}
+          />
           <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs">
             {JSON.stringify(contableJson, null, 2)}
           </pre>

@@ -16,7 +16,8 @@ export const loggedInNavItems: SiteNavItem[] = [
         pathname.startsWith("/proveedores") || pathname.startsWith("/carga-proveedores");
       const onAccounts =
         pathname.startsWith("/cuentas") || pathname.startsWith("/carga-cuentas");
-      return !onHistory && !onSuppliers && !onAccounts;
+      const onApi = pathname.startsWith("/api-config");
+      return !onHistory && !onSuppliers && !onAccounts && !onApi;
     },
   },
   {
@@ -36,6 +37,11 @@ export const loggedInNavItems: SiteNavItem[] = [
     label: "Cuentas",
     match: (pathname) =>
       pathname.startsWith("/cuentas") || pathname.startsWith("/carga-cuentas"),
+  },
+  {
+    href: "/api-config",
+    label: "API",
+    match: (pathname) => pathname.startsWith("/api-config"),
   },
 ];
 

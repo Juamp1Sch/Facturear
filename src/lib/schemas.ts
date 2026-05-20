@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+/** Renglón del desglose de IVA o percepciones en el comprobante. */
+export const taxBreakdownLineSchema = z.object({
+  label: z
+    .string()
+    .nullable()
+    .describe(
+      "Texto del renglón en la factura (ej. IVA 21%, Percepción IIBB CABA, Percepción IVA)",
+    ),
+  amount: z.number().describe("Importe en pesos de ese renglón"),
+});
+
+export type TaxBreakdownLine = z.infer<typeof taxBreakdownLineSchema>;
+
 /** Structured extraction from OCR text (Argentina-style invoices). */
 export const invoiceExtractionSchema = z.object({
   provider: z
@@ -33,7 +46,30 @@ export const invoiceExtractionSchema = z.object({
       "Tipo de documento: FACTURA, NOTA_CREDITO o NOTA_DEBITO según el encabezado del comprobante",
     ),
   net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
-  vat_amount: z.number().nullable().describe("Importe de IVA"),
+  vat_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Total de IVA del comprobante. Debe coincidir con la suma de vat_lines si las devolvés.",
+    ),
+  vat_lines: z
+    .array(taxBreakdownLineSchema)
+    .nullable()
+    .describe(
+      "Cada renglón de IVA del desglose fiscal (pie de factura, tabla de impuestos). Un elemento por alícuota o importe de IVA legible.",
+    ),
+  perceptions_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Total de percepciones. Debe coincidir con la suma de perception_lines si las devolvés.",
+    ),
+  perception_lines: z
+    .array(taxBreakdownLineSchema)
+    .nullable()
+    .describe(
+      "Cada percepción por separado (IIBB, percepción IVA, etc.) con su importe. null si no hay percepciones.",
+    ),
   total_amount: z.number().nullable().describe("Importe total"),
   chart_account_code: z
     .string()

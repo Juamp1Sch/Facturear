@@ -39,9 +39,14 @@ export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem })
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="line-clamp-2 text-base">{title}</CardTitle>
-            <Badge variant={statusVariant(invoice.status)}>
-              {statusLabel[invoice.status] ?? invoice.status}
-            </Badge>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Badge variant={statusVariant(invoice.status)}>
+                {statusLabel[invoice.status] ?? invoice.status}
+              </Badge>
+              {invoice.destinationUploadedAt ? (
+                <Badge variant="outline">Cargada</Badge>
+              ) : null}
+            </div>
           </div>
           <CardDescription className="line-clamp-2">
             {invoice.providerCuit ?? "CUIT —"} ·{" "}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -32,19 +33,27 @@ export function ChartAccountPicker({
   value,
   onChange,
   disabled,
+  inputId = "chartAccountId",
 }: {
   accounts: ChartAccountOption[];
   value: string;
   onChange: (accountId: string) => void;
   disabled?: boolean;
+  inputId?: string;
 }) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLElement | null>(null);
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [listRect, setListRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
 
   const selected = accounts.find((a) => a.id === value);
 
@@ -73,12 +82,40 @@ export function ChartAccountPicker({
     setActiveIndex(0);
   }, [query, open]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setListRect(null);
+      return;
+    }
+
+    const updateRect = () => {
+      const input = inputRef.current;
+      if (!input) return;
+      const rect = input.getBoundingClientRect();
+      setListRect({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+
+    updateRect();
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
+  }, [open, filtered.length, query]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || dropdownRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
@@ -112,12 +149,73 @@ export function ChartAccountPicker({
     }
   };
 
+  const listClassName =
+    "max-h-56 overflow-y-auto rounded-md border border-border bg-background py-1 shadow-md";
+
+  const dropdown =
+    open && listRect && filtered.length > 0 ? (
+      <ul
+        ref={(el) => {
+          dropdownRef.current = el;
+        }}
+        id={listId}
+        role="listbox"
+        className={cn("fixed z-[100]", listClassName)}
+        style={{
+          top: listRect.top,
+          left: listRect.left,
+          width: listRect.width,
+        }}
+      >
+        {filtered.map((a, index) => {
+          const label = formatAccountLabel(a);
+          const isSelected = a.id === value;
+          const isActive = index === activeIndex;
+          return (
+            <li key={a.id} role="option" aria-selected={isSelected}>
+              <button
+                type="button"
+                className={cn(
+                  "w-full px-3 py-2 text-left text-sm",
+                  isActive && "bg-muted",
+                  isSelected && "font-medium",
+                  !isActive && !isSelected && "hover:bg-muted/60",
+                )}
+                onMouseEnter={() => setActiveIndex(index)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(a)}
+              >
+                {label}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    ) : null;
+
+  const emptyDropdown =
+    open && listRect && query.trim() && filtered.length === 0 ? (
+      <p
+        ref={(el) => {
+          dropdownRef.current = el;
+        }}
+        className="fixed z-[100] rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground shadow-md"
+        style={{
+          top: listRect.top,
+          left: listRect.left,
+          width: listRect.width,
+        }}
+      >
+        Ninguna cuenta coincide.
+      </p>
+    ) : null;
+
   return (
     <div ref={rootRef} className="relative">
       <div className="relative">
         <Input
           ref={inputRef}
-          id="chartAccountId"
+          id={inputId}
           type="text"
           role="combobox"
           aria-expanded={open}
@@ -147,43 +245,12 @@ export function ChartAccountPicker({
         />
       </div>
 
-      {open && filtered.length > 0 ? (
-        <ul
-          id={listId}
-          role="listbox"
-          className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-background py-1 shadow-md"
-        >
-          {filtered.map((a, index) => {
-            const label = formatAccountLabel(a);
-            const isSelected = a.id === value;
-            const isActive = index === activeIndex;
-            return (
-              <li key={a.id} role="option" aria-selected={isSelected}>
-                <button
-                  type="button"
-                  className={cn(
-                    "w-full px-3 py-2 text-left text-sm",
-                    isActive && "bg-muted",
-                    isSelected && "font-medium",
-                    !isActive && !isSelected && "hover:bg-muted/60",
-                  )}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pick(a)}
-                >
-                  {label}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-
-      {open && query.trim() && filtered.length === 0 ? (
-        <p className="absolute z-50 mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground shadow-md">
-          Ninguna cuenta coincide.
-        </p>
-      ) : null}
+      {typeof document !== "undefined" && dropdown
+        ? createPortal(dropdown, document.body)
+        : null}
+      {typeof document !== "undefined" && emptyDropdown
+        ? createPortal(emptyDropdown, document.body)
+        : null}
     </div>
   );
 }
