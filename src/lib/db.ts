@@ -9,3 +9,8 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
+  const sanitized = process.env.DATABASE_URL.replace(/:[^:@]+@/, ":***@");
+  console.info("[prisma] DATABASE_URL =", sanitized);
+}

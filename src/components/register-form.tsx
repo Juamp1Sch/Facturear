@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { register } from "@/actions/auth";
+import { passwordRulesMessage } from "@/lib/auth-schemas";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,8 +40,25 @@ export function RegisterForm() {
       <form action={action} className="contents">
         <CardContent className="space-y-4">
           {state?.message ? (
-            <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p
+              className={
+                state.success
+                  ? "rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200"
+                  : "rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              }
+            >
               {state.message}
+              {state.success ? (
+                <>
+                  {" "}
+                  <Link
+                    href="/verificar-cuenta"
+                    className="font-medium underline underline-offset-4"
+                  >
+                    Activar cuenta
+                  </Link>
+                </>
+              ) : null}
             </p>
           ) : null}
           <div className="space-y-2">
@@ -91,8 +109,27 @@ export function RegisterForm() {
             {state?.errors?.password?.[0] ? (
               <p className="text-sm text-destructive">{state.errors.password[0]}</p>
             ) : (
-              <p className="text-xs text-muted-foreground">Mínimo 8 caracteres.</p>
+              <p className="text-xs text-muted-foreground">{passwordRulesMessage}</p>
             )}
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="confirmPassword" className="text-sm font-medium">
+              Repetir contraseña
+            </label>
+            <Input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              aria-invalid={Boolean(state?.errors?.confirmPassword)}
+            />
+            {state?.errors?.confirmPassword?.[0] ? (
+              <p className="text-sm text-destructive">
+                {state.errors.confirmPassword[0]}
+              </p>
+            ) : null}
           </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-4">
