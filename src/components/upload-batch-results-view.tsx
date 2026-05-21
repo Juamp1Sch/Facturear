@@ -1,9 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { InvoiceDocumentPreview } from "@/components/invoice-document-preview";
 import { InvoiceExtractedFields } from "@/components/invoice-extracted-fields";
 import { InvoiceUploadButton } from "@/components/invoice-upload-button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -14,11 +19,9 @@ import {
 import { buildInvoiceJson } from "@/lib/invoice-json";
 import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
-import type { SerializedInvoiceDetail } from "@/types/invoice";
+import type { SerializedBatchInvoice } from "@/types/invoice";
 
-function isErrorPayload(
-  p: unknown,
-): p is { error: string } {
+function isErrorPayload(p: unknown): p is { error: string } {
   return (
     typeof p === "object" &&
     p !== null &&
@@ -39,12 +42,8 @@ function mergeMaestroIntoAiJson(
     return aiPayload;
   }
   const o = { ...(aiPayload as Record<string, unknown>) };
-  if (supplierCode) {
-    o.supplier_code = supplierCode;
-  }
-  if (providerCuit) {
-    o.cuit = providerCuit;
-  }
+  if (supplierCode) o.supplier_code = supplierCode;
+  if (providerCuit) o.cuit = providerCuit;
   if (chartAccount) {
     o.chart_account_code = chartAccount.code;
     o.chart_account_name = chartAccount.name;
@@ -52,23 +51,71 @@ function mergeMaestroIntoAiJson(
   return o;
 }
 
-export function InvoiceDetail({
-  invoice,
+function InvoicePagination({
+  current,
+  total,
+  onChange,
+}: {
+  current: number;
+  total: number;
+  onChange: (index: number) => void;
+}) {
+  if (total <= 1) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-4 py-3">
+      <span className="text-sm font-medium">
+        Factura {current + 1} de {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current <= 0}
+          onClick={() => onChange(current - 1)}
+        >
+          <ChevronLeft />
+          Anterior
+        </Button>
+        <select
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          value={current}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label="Seleccionar factura"
+        >
+          {Array.from({ length: total }, (_, i) => (
+            <option key={i} value={i}>
+              Factura {i + 1}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current >= total - 1}
+          onClick={() => onChange(current + 1)}
+        >
+          Siguiente
+          <ChevronRight />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function UploadBatchResultsView({
+  invoices,
   taxChartAccounts,
-  documentParts,
-  showErrorBanner,
   apiConfigured,
 }: {
-  invoice: SerializedInvoiceDetail;
+  invoices: SerializedBatchInvoice[];
   taxChartAccounts: ResolvedTaxChartAccounts;
-  documentParts: { mimeType: string; previewUrl: string }[];
-  showErrorBanner: boolean;
   apiConfigured: boolean;
 }) {
-  const err =
-    showErrorBanner && isErrorPayload(invoice.aiPayload)
-      ? invoice.aiPayload.error
-      : null;
+  const [invoiceIndex, setInvoiceIndex] = useState(0);
+  const invoice = invoices[invoiceIndex];
+  if (!invoice) return null;
 
   const payloadIsError = isErrorPayload(invoice.aiPayload);
   const jsonForDisplay = mergeMaestroIntoAiJson(
@@ -80,7 +127,6 @@ export function InvoiceDetail({
   );
 
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
-
   const contableJson = buildInvoiceJson({
     movementId: invoice.movementId,
     empresa: invoice.empresa,
@@ -108,16 +154,22 @@ export function InvoiceDetail({
         ? "Corregí los datos de la factura antes de cargarla."
         : null;
 
+  const parts = invoice.files.map((f) => ({
+    mimeType: f.mimeType,
+    previewUrl: f.signedUrl,
+  }));
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6">
+      <h2 className="text-xl font-semibold tracking-tight">
+        Resultados del lote ({invoices.length} factura
+        {invoices.length !== 1 ? "s" : ""})
+      </h2>
+
       <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href="/history"
-          className="text-sm text-muted-foreground hover:text-foreground"
+        <Badge
+          variant={invoice.status === "ERROR" ? "destructive" : "secondary"}
         >
-          ← Historial
-        </Link>
-        <Badge variant={invoice.status === "ERROR" ? "destructive" : "secondary"}>
           {invoice.status}
         </Badge>
         {invoice.aiConfidence != null ? (
@@ -125,31 +177,37 @@ export function InvoiceDetail({
             Confianza IA: {(invoice.aiConfidence * 100).toFixed(0)}%
           </span>
         ) : null}
+        <Link
+          href={`/history/${invoice.id}`}
+          className="text-sm text-primary hover:underline"
+        >
+          Ver en historial →
+        </Link>
       </div>
-
-      {err ? (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {err}
-        </div>
-      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Documento</CardTitle>
             <CardDescription>
-              {documentParts.length > 1
-                ? `${documentParts.length} partes`
+              {invoice.files.length > 1
+                ? `${invoice.files.length} partes`
                 : invoice.mimeType}
             </CardDescription>
           </CardHeader>
           <CardContent className="min-h-[320px] p-3 sm:p-6">
-            <InvoiceDocumentPreview parts={documentParts} />
+            <InvoiceDocumentPreview parts={parts} />
           </CardContent>
         </Card>
 
         <InvoiceExtractedFields invoice={invoice} />
       </div>
+
+      <InvoicePagination
+        current={invoiceIndex}
+        total={invoices.length}
+        onChange={setInvoiceIndex}
+      />
 
       <Card>
         <CardHeader>

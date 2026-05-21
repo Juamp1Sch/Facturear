@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,15 +10,65 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 3;
 const SCALE_STEP = 0.25;
 
-type InvoiceDocumentPreviewProps = {
+export type DocumentPreviewPart = {
   mimeType: string;
   previewUrl: string;
 };
 
+type InvoiceDocumentPreviewProps = {
+  parts: DocumentPreviewPart[];
+};
+
+function PartPagination({
+  current,
+  total,
+  onChange,
+}: {
+  current: number;
+  total: number;
+  onChange: (index: number) => void;
+}) {
+  if (total <= 1) return null;
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+      <span className="text-xs font-medium text-muted-foreground">
+        Parte {current + 1} de {total}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current <= 0}
+          onClick={() => onChange(current - 1)}
+          aria-label="Parte anterior"
+        >
+          <ChevronLeft />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current >= total - 1}
+          onClick={() => onChange(current + 1)}
+          aria-label="Parte siguiente"
+        >
+          <ChevronRight />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function InvoiceDocumentPreview({
-  mimeType,
-  previewUrl,
+  parts,
 }: InvoiceDocumentPreviewProps) {
+  const [partIndex, setPartIndex] = useState(0);
+  const safeIndex = Math.min(partIndex, Math.max(0, parts.length - 1));
+  const active = parts[safeIndex] ?? parts[0];
+  if (!active) return null;
+
+  const { mimeType, previewUrl } = active;
   const isPdf = mimeType === "application/pdf";
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -31,6 +81,12 @@ export function InvoiceDocumentPreview({
     setScale(1);
     setPan({ x: 0, y: 0 });
   }, []);
+
+  const partsKey = parts.map((p) => p.previewUrl).join("|");
+  useEffect(() => {
+    setPartIndex(0);
+    resetView();
+  }, [parts.length, partsKey, resetView]);
 
   const zoomIn = useCallback(() => {
     setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP));
@@ -82,6 +138,10 @@ export function InvoiceDocumentPreview({
   }, [isDragging]);
 
   useEffect(() => {
+    resetView();
+  }, [safeIndex, resetView]);
+
+  useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (pdfExpanded) {
@@ -111,6 +171,12 @@ export function InvoiceDocumentPreview({
 
   return (
     <>
+      <PartPagination
+        current={safeIndex}
+        total={parts.length}
+        onChange={setPartIndex}
+      />
+
       <div className="mb-2 flex flex-wrap items-center gap-2">
         {!isPdf ? (
           <>
@@ -209,7 +275,9 @@ export function InvoiceDocumentPreview({
           onClose={closePdfDialog}
         >
           <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
-            <span className="text-sm font-medium">Factura PDF</span>
+            <span className="text-sm font-medium">
+              Factura PDF{parts.length > 1 ? ` — parte ${safeIndex + 1}` : ""}
+            </span>
             <div className="flex gap-2">
               {openInNewTabLink}
               <Button type="button" variant="outline" size="sm" onClick={closePdfDialog}>
