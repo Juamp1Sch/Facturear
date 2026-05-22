@@ -116,3 +116,55 @@ export async function extractInvoiceDataFromImage(
   }
   return parsed;
 }
+
+export async function extractInvoiceDataFromImages(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+  options: InvoiceExtractOptions = {},
+): Promise<InvoiceExtraction> {
+  if (images.length === 0) {
+    throw new Error("Se requiere al menos una imagen para la extracción.");
+  }
+  if (images.length === 1) {
+    return extractInvoiceDataFromImage(
+      images[0]!.buffer,
+      images[0]!.mimeType,
+      options,
+    );
+  }
+
+  const openai = getOpenAI();
+  const systemContent = buildSystemPrompt(SYSTEM_PROMPT_VISION, options);
+  const partLabels = images.map((_, i) => `parte ${i + 1}`).join(", ");
+
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN.`,
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await openai.beta.chat.completions.parse({
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: userContent },
+    ],
+    response_format: zodResponseFormat(
+      invoiceExtractionSchema,
+      "invoice_extraction",
+    ),
+  });
+
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed) {
+    throw new Error("OpenAI no devolvió datos parseables.");
+  }
+  return parsed;
+}

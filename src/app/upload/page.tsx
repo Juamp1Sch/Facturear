@@ -8,7 +8,7 @@ export default function UploadPage() {
   return (
     <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
       <h1 className="mx-auto mb-6 w-full max-w-xl text-2xl font-semibold tracking-tight">
-        Cargar factura
+        Cargar facturas
       </h1>
       {!dbOk ? (
         <div className="mb-6">

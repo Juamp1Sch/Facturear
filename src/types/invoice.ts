@@ -38,10 +38,23 @@ export type SerializedInvoiceListItem = {
   destinationUploadedAt: string | null;
 };
 
+export type SerializedInvoiceFilePart = {
+  partIndex: number;
+  fileKey: string;
+  fileUrl: string;
+  mimeType: string;
+  signedUrl: string;
+};
+
 export type SerializedInvoiceDetail = SerializedInvoiceListItem & {
+  batchId: string | null;
   originalFileUrl: string;
   originalFileKey: string;
   rawOcrText: string | null;
   invoiceType: string | null;
   aiPayload: unknown;
+  files: SerializedInvoiceFilePart[];
 };
+
+/** Factura serializada para la vista de resultados del lote en /upload */
+export type SerializedBatchInvoice = SerializedInvoiceDetail;

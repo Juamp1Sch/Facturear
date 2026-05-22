@@ -6,10 +6,18 @@ import { redirect } from "next/navigation";
 import { Prisma, type InvoiceStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
+import { isApiConfiguredForUser } from "@/actions/api-config";
 import {
   extractInvoiceData,
   extractInvoiceDataFromImage,
+  extractInvoiceDataFromImages,
 } from "@/lib/ai";
+import { serializeInvoiceForBatch } from "@/lib/serialize-invoice";
+import {
+  resolveTaxChartAccountsForUser,
+  type ResolvedTaxChartAccounts,
+} from "@/lib/tax-chart-account";
+import type { SerializedBatchInvoice } from "@/types/invoice";
 import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import {
@@ -32,7 +40,305 @@ import { parseDocumentKind } from "@/lib/comprobante-code";
 import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
+const BATCH_CONCURRENCY = 3;
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+export type UploadBatchState =
+  | { status: "idle" }
+  | {
+      status: "ok";
+      batchId: string;
+      invoiceIds: string[];
+      invoices: SerializedBatchInvoice[];
+      taxChartAccounts: ResolvedTaxChartAccounts;
+      apiConfigured: boolean;
+    }
+  | { status: "error"; message: string };
+
+async function loadSerializedBatchInvoices(
+  userId: string,
+  invoiceIds: string[],
+): Promise<SerializedBatchInvoice[]> {
+  const rows = await prisma.invoice.findMany({
+    where: { id: { in: invoiceIds }, userId },
+    include: {
+      chartAccount: true,
+      accountingAccount: true,
+      files: { orderBy: { partIndex: "asc" } },
+    },
+  });
+
+  const order = new Map(invoiceIds.map((id, i) => [id, i]));
+  rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+  return Promise.all(rows.map((row) => serializeInvoiceForBatch(row)));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]!, i);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+function parseFileGroups(
+  raw: FormDataEntryValue | null,
+  fileCount: number,
+): number[][] {
+  if (typeof raw !== "string" || !raw.trim()) {
+    throw new Error("Falta la agrupación de archivos.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("La agrupación de archivos no es válida.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("La agrupación de archivos no es válida.");
+  }
+  const groups = parsed as number[][];
+  const seen = new Set<number>();
+  for (const group of groups) {
+    if (!Array.isArray(group) || group.length === 0) {
+      throw new Error("Cada factura debe tener al menos un archivo.");
+    }
+    for (const idx of group) {
+      if (typeof idx !== "number" || idx < 0 || idx >= fileCount || seen.has(idx)) {
+        throw new Error("Índices de agrupación inválidos.");
+      }
+      seen.add(idx);
+    }
+  }
+  if (seen.size !== fileCount) {
+    throw new Error("Todos los archivos deben pertenecer a una factura.");
+  }
+  return groups;
+}
+
+type UploadedPart = {
+  buffer: Buffer;
+  mimeType: string;
+  key: string;
+  publicUrl: string;
+};
+
+async function extractFromParts(
+  parts: UploadedPart[],
+  extractOpts: {
+    maestroCuitHintsBlock: string | null;
+    chartAccountHintsBlock: string | null;
+  },
+): Promise<{ extracted: InvoiceExtraction; rawOcrText: string | null }> {
+  const pdfTexts: { partNum: number; text: string; weak: boolean }[] = [];
+  const allPdf = parts.every((p) => p.mimeType === "application/pdf");
+
+  if (allPdf) {
+    for (let i = 0; i < parts.length; i++) {
+      const text = await runOcr(parts[i]!.buffer, "application/pdf");
+      pdfTexts.push({
+        partNum: i + 1,
+        text,
+        weak: pdfEmbeddedTextIsWeak(text),
+      });
+    }
+    const allStrong = pdfTexts.every((p) => !p.weak);
+    if (allStrong) {
+      const combined = pdfTexts
+        .map((p) => `--- Parte ${p.partNum} ---\n${p.text}`)
+        .join("\n\n");
+      const extracted = await extractInvoiceData(combined, extractOpts);
+      return { extracted, rawOcrText: combined };
+    }
+  }
+
+  const visionImages: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[] =
+    [];
+  const ocrNotes: string[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    if (part.mimeType === "application/pdf") {
+      const pdfText = await runOcr(part.buffer, part.mimeType);
+      if (!pdfEmbeddedTextIsWeak(pdfText)) {
+        ocrNotes.push(`--- Parte ${i + 1} (PDF texto) ---\n${pdfText.slice(0, 8000)}`);
+      }
+      const pagePng = await rasterizePdfFirstPagePng(part.buffer);
+      visionImages.push({ buffer: pagePng, mimeType: "image/png" });
+    } else {
+      visionImages.push({
+        buffer: part.buffer,
+        mimeType: part.mimeType as "image/jpeg" | "image/png",
+      });
+    }
+  }
+
+  const extracted = await extractInvoiceDataFromImages(visionImages, extractOpts);
+  const rawOcrText =
+    ocrNotes.length > 0
+      ? `${ocrNotes.join("\n\n")}\n\n[Campos inferidos por visión en ${parts.length} parte(s).]`
+      : `[${parts.length} parte(s): campos inferidos por visión.]`;
+  return { extracted, rawOcrText };
+}
+
+async function applyExtractionToInvoice(
+  invoiceId: string,
+  userId: string,
+  extracted: InvoiceExtraction,
+  rawOcrText: string | null,
+): Promise<void> {
+  const resolved = await resolveOrCreateInvoiceSupplier(
+    userId,
+    extracted.provider,
+    extracted.cuit,
+  );
+  const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
+  const providerCuit = resolved?.cuit ?? aiCuit;
+  const supplierCode = resolved?.code ?? null;
+
+  let chartAccount =
+    (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
+    (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
+
+  const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
+  const movementId = await allocateUniqueMovementId(invoiceDate);
+  const documentKind = parseDocumentKind(extracted.document_kind);
+
+  const vatFromLines = sumTaxLines(extracted.vat_lines);
+  const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
+  const vatAmount = vatFromLines ?? extracted.vat_amount;
+  const perceptionsAmount =
+    perceptionsFromLines ?? extracted.perceptions_amount;
+
+  const aiPayloadOut: Record<string, unknown> = {
+    ...(extracted as Record<string, unknown>),
+  };
+  if (supplierCode) aiPayloadOut.supplier_code = supplierCode;
+  if (resolved?.cuit) aiPayloadOut.cuit = providerCuit;
+  if (chartAccount) {
+    aiPayloadOut.chart_account_code = chartAccount.code;
+    aiPayloadOut.chart_account_name = chartAccount.name;
+  }
+
+  await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      rawOcrText,
+      providerName: extracted.provider,
+      providerCuit,
+      supplierCode,
+      movementId,
+      documentKind,
+      invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(extracted.invoice_number),
+      invoiceType: extracted.invoice_type,
+      invoiceDate,
+      netAmount:
+        extracted.net_amount != null
+          ? new Prisma.Decimal(extracted.net_amount)
+          : null,
+      vatAmount: vatAmount != null ? new Prisma.Decimal(vatAmount) : null,
+      perceptionsAmount:
+        perceptionsAmount != null
+          ? new Prisma.Decimal(perceptionsAmount)
+          : null,
+      totalAmount:
+        extracted.total_amount != null
+          ? new Prisma.Decimal(extracted.total_amount)
+          : null,
+      chartAccountId: chartAccount?.id ?? null,
+      aiConfidence: extracted.confidence,
+      aiPayload: aiPayloadOut as object,
+      status: "READY",
+    },
+  });
+}
+
+async function processInvoiceGroup(
+  userId: string,
+  batchId: string,
+  indices: number[],
+  files: File[],
+  buffers: Buffer[],
+  mimeTypes: string[],
+  extractOpts: {
+    maestroCuitHintsBlock: string | null;
+    chartAccountHintsBlock: string | null;
+  },
+): Promise<string> {
+  const uploadedParts: UploadedPart[] = [];
+  for (const idx of indices) {
+    const mimeType = mimeTypes[idx]!;
+    const buffer = buffers[idx]!;
+    const ext = extForMime(mimeType);
+    const key = `invoices/${userId}/${randomUUID()}.${ext}`;
+    const uploaded = await uploadBuffer({ key, buffer, contentType: mimeType });
+    uploadedParts.push({
+      buffer,
+      mimeType,
+      key: uploaded.key,
+      publicUrl: uploaded.publicUrl,
+    });
+  }
+
+  const first = uploadedParts[0]!;
+  const invoice = await prisma.invoice.create({
+    data: {
+      userId,
+      batchId,
+      originalFileUrl: first.publicUrl,
+      originalFileKey: first.key,
+      mimeType: first.mimeType,
+      status: "PROCESSING",
+      files: {
+        create: uploadedParts.map((p, partIndex) => ({
+          partIndex,
+          fileKey: p.key,
+          fileUrl: p.publicUrl,
+          mimeType: p.mimeType,
+        })),
+      },
+    },
+  });
+
+  try {
+    const { extracted, rawOcrText } = await extractFromParts(
+      uploadedParts,
+      extractOpts,
+    );
+    await applyExtractionToInvoice(invoice.id, userId, extracted, rawOcrText);
+    revalidatePath(`/history/${invoice.id}`);
+    return invoice.id;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Error desconocido";
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status: "ERROR",
+        aiPayload: { error: message } as object,
+      },
+    });
+    revalidatePath(`/history/${invoice.id}`);
+    return invoice.id;
+  }
+}
 
 /** Menos que esto suele ser PDF escaneado o solo metadatos; pasamos a visión en la 1.ª página. */
 const MIN_PDF_TEXT_CHARS = 32;
@@ -160,6 +466,14 @@ export async function uploadInvoice(formData: FormData) {
       originalFileKey: uploaded.key,
       mimeType,
       status: "PROCESSING",
+      files: {
+        create: {
+          partIndex: 0,
+          fileKey: uploaded.key,
+          fileUrl: uploaded.publicUrl,
+          mimeType,
+        },
+      },
     },
   });
 
@@ -284,6 +598,117 @@ export async function uploadInvoice(formData: FormData) {
   revalidatePath("/proveedores");
   revalidatePath(`/history/${invoice.id}`);
   redirect(`/history/${invoice.id}`);
+}
+
+export async function uploadInvoiceBatch(
+  _prev: UploadBatchState,
+  formData: FormData,
+): Promise<UploadBatchState> {
+  if (!isDatabaseConfigured()) {
+    return {
+      status: "error",
+      message:
+        "Falta DATABASE_URL en .env. Configurá PostgreSQL y reiniciá el servidor.",
+    };
+  }
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+  const userId = session.user.id;
+
+  const rawFiles = formData.getAll("files");
+  const files = rawFiles.filter((f): f is File => f instanceof File);
+  if (files.length === 0) {
+    return { status: "error", message: "No se recibió ningún archivo." };
+  }
+  if (files.length > BATCH_MAX_FILES) {
+    return {
+      status: "error",
+      message: `Máximo ${BATCH_MAX_FILES} archivos por lote.`,
+    };
+  }
+
+  let groups: number[][];
+  try {
+    groups = parseFileGroups(formData.get("groups"), files.length);
+  } catch (e) {
+    return {
+      status: "error",
+      message: e instanceof Error ? e.message : "Agrupación inválida.",
+    };
+  }
+
+  const buffers: Buffer[] = [];
+  const mimeTypes: string[] = [];
+  for (const file of files) {
+    if (file.size > MAX_BYTES) {
+      return {
+        status: "error",
+        message: `El archivo "${file.name}" supera los 10 MB.`,
+      };
+    }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const mimeType = resolveInvoiceMimeType(file, buffer);
+    if (!mimeType) {
+      return {
+        status: "error",
+        message: `Formato no permitido en "${file.name}". Solo PDF, JPG o PNG.`,
+      };
+    }
+    buffers.push(buffer);
+    mimeTypes.push(mimeType);
+  }
+
+  const batchId = randomUUID();
+  const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
+    loadSupplierMaestroCuitHintsBlock(userId),
+    loadChartAccountHintsBlock(userId),
+  ]);
+  const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
+
+  const invoiceIds = await mapWithConcurrency(
+    groups,
+    BATCH_CONCURRENCY,
+    (indices) =>
+      processInvoiceGroup(
+        userId,
+        batchId,
+        indices,
+        files,
+        buffers,
+        mimeTypes,
+        extractOpts,
+      ),
+  );
+
+  revalidatePath("/history");
+  revalidatePath("/proveedores");
+  revalidatePath("/upload");
+
+  const [invoices, taxChartAccounts, apiConfigured] = await Promise.all([
+    loadSerializedBatchInvoices(userId, invoiceIds),
+    resolveTaxChartAccountsForUser(userId),
+    isApiConfiguredForUser(userId),
+  ]);
+
+  return {
+    status: "ok",
+    batchId,
+    invoiceIds,
+    invoices,
+    taxChartAccounts,
+    apiConfigured,
+  };
+}
+
+export async function getBatchInvoicesForUpload(
+  invoiceIds: string[],
+): Promise<SerializedBatchInvoice[]> {
+  const session = await auth();
+  if (!session?.user?.id) return [];
+  return loadSerializedBatchInvoices(session.user.id, invoiceIds);
 }
 
 export type UpdateInvoiceFieldsResult =

@@ -44,6 +44,7 @@ model Invoice {
   id                  String             @id @default(cuid())
   userId              String             @map("user_id")
   user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batchId             String?            @map("batch_id")
   originalFileUrl     String             @map("original_file_url")
   originalFileKey     String             @map("original_file_key")
   mimeType            String             @map("mime_type")
@@ -74,6 +75,23 @@ model Invoice {
   destinationUploadBody   String?   @map("destination_upload_body") @db.Text
   createdAt           DateTime           @default(now()) @map("created_at")
   corrections         Correction[]
+  files               InvoiceFile[]
+
+  @@index([batchId])
+}
+
+model InvoiceFile {
+  id          String   @id @default(cuid())
+  invoiceId   String   @map("invoice_id")
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  partIndex   Int      @map("part_index")
+  fileKey     String   @map("file_key")
+  fileUrl     String   @map("file_url")
+  mimeType    String   @map("mime_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([invoiceId, partIndex])
+  @@map("invoice_files")
 }
 
 model AccountingAccount {

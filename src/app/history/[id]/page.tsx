@@ -40,17 +40,44 @@ export default async function InvoiceDetailPage({
 
   const invoice = await prisma.invoice.findFirst({
     where: { id, userId: session.user.id },
-    include: { chartAccount: true },
+    include: {
+      chartAccount: true,
+      files: { orderBy: { partIndex: "asc" } },
+    },
   });
 
   if (!invoice) notFound();
 
-  const [previewUrl, taxChartAccounts, apiConfigured] = await Promise.all([
-    getSignedReadUrl(invoice.originalFileKey),
+  const fileRows =
+    invoice.files.length > 0
+      ? invoice.files
+      : [
+          {
+            partIndex: 0,
+            fileKey: invoice.originalFileKey,
+            mimeType: invoice.mimeType,
+          },
+        ];
+
+  const [documentParts, taxChartAccounts, apiConfigured] = await Promise.all([
+    Promise.all(
+      fileRows.map(async (f) => ({
+        mimeType: f.mimeType,
+        previewUrl: await getSignedReadUrl(f.fileKey),
+      })),
+    ),
     resolveTaxChartAccountsForUser(session.user.id),
     isApiConfiguredForUser(session.user.id),
   ]);
+
   const data = JSON.parse(JSON.stringify(invoice)) as SerializedInvoiceDetail;
+  data.files = fileRows.map((f, i) => ({
+    partIndex: f.partIndex,
+    fileKey: f.fileKey,
+    fileUrl: "fileUrl" in f && typeof f.fileUrl === "string" ? f.fileUrl : "",
+    mimeType: f.mimeType,
+    signedUrl: documentParts[i]?.previewUrl ?? "",
+  }));
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
@@ -60,7 +87,7 @@ export default async function InvoiceDetailPage({
       <InvoiceDetail
         invoice={data}
         taxChartAccounts={taxChartAccounts}
-        previewUrl={previewUrl}
+        documentParts={documentParts}
         showErrorBanner={query.error === "1"}
         apiConfigured={apiConfigured}
       />
