@@ -107,13 +107,17 @@ export function InvoiceExtractedFields({
       fd.append(
         "empresa",
         (
-          partial.empresa !== undefined ? partial.empresa : invoice.empresa ?? ""
+          partial.empresa !== undefined
+            ? (partial.empresa ?? "")
+            : (invoice.empresa ?? "")
         ).trim(),
       );
       fd.append(
         "sucursal",
         (
-          partial.sucursal !== undefined ? partial.sucursal : invoice.sucursal ?? ""
+          partial.sucursal !== undefined
+            ? (partial.sucursal ?? "")
+            : (invoice.sucursal ?? "")
         ).trim(),
       );
       setAssocSaving(true);
