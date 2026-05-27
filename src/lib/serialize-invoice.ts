@@ -1,3 +1,4 @@
+import { normalizeCuitKey } from "@/lib/cuit-associations";
 import { getSignedReadUrl } from "@/lib/storage";
 import type {
   SerializedBatchInvoice,
@@ -73,11 +74,15 @@ export async function serializeInvoiceForBatch(
   );
 
   const base = JSON.parse(JSON.stringify(invoice)) as Record<string, unknown>;
-  const cuit = invoice.providerCuit;
+  const cuitKey = normalizeCuitKey(invoice.providerCuit);
   const cuitEmpresaOptions =
-    cuit && cuitOptions ? (cuitOptions.empresasByCuit.get(cuit) ?? []) : [];
+    cuitKey && cuitOptions
+      ? (cuitOptions.empresasByCuit.get(cuitKey) ?? [])
+      : [];
   const cuitSucursalOptions =
-    cuit && cuitOptions ? (cuitOptions.sucursalesByCuit.get(cuit) ?? []) : [];
+    cuitKey && cuitOptions
+      ? (cuitOptions.sucursalesByCuit.get(cuitKey) ?? [])
+      : [];
 
   return {
     ...(base as Omit<

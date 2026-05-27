@@ -9,7 +9,11 @@ import { isDatabaseConfigured } from "@/lib/database-config";
 import { prisma } from "@/lib/db";
 import { parseSupplierMasterBuffer } from "@/lib/supplier-import-parse";
 import { buildSupplierSearchWhere } from "@/lib/supplier-search";
-import { getCuitAssociationsForCuits, setCuitAssociations } from "@/lib/cuit-associations";
+import {
+  getCuitAssociationsForCuits,
+  normalizeCuitKey,
+  setCuitAssociations,
+} from "@/lib/cuit-associations";
 import { syncInvoiceSupplierCodesForUser } from "@/lib/supplier-sync";
 import type { SerializedSupplier } from "@/types/supplier";
 
@@ -181,18 +185,19 @@ export async function listSuppliersPageForUser(
       rows.map((r) => r.cuit),
     );
 
-  const suppliers: SerializedSupplier[] = rows.map((row) => ({
-    ...(JSON.parse(JSON.stringify(row)) as Omit<
-      SerializedSupplier,
-      "empresas" | "sucursales"
-    >),
-    empresas:
-      row.cuit != null ? (empresasByCuit.get(row.cuit) ?? []).slice() : [],
-    sucursales:
-      row.cuit != null
-        ? (sucursalesByCuit.get(row.cuit) ?? []).slice()
+  const suppliers: SerializedSupplier[] = rows.map((row) => {
+    const cuitKey = normalizeCuitKey(row.cuit);
+    return {
+      ...(JSON.parse(JSON.stringify(row)) as Omit<
+        SerializedSupplier,
+        "empresas" | "sucursales"
+      >),
+      empresas: cuitKey ? (empresasByCuit.get(cuitKey) ?? []).slice() : [],
+      sucursales: cuitKey
+        ? (sucursalesByCuit.get(cuitKey) ?? []).slice()
         : [],
-  }));
+    };
+  });
 
   return {
     suppliers,

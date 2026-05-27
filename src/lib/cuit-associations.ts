@@ -20,13 +20,23 @@ function normalizeValues(values: string[]): string[] {
   return out;
 }
 
+/** Misma clave que al guardar asociaciones (trim; vacío → null). */
+export function normalizeCuitKey(
+  cuit: string | null | undefined,
+): string | null {
+  if (cuit == null) return null;
+  const t = cuit.trim();
+  return t.length > 0 ? t : null;
+}
+
 export async function getCuitEmpresas(
   userId: string,
   cuit: string | null | undefined,
 ): Promise<string[]> {
-  if (!cuit?.trim()) return [];
+  const normalizedCuit = normalizeCuitKey(cuit);
+  if (!normalizedCuit) return [];
   const rows = await prisma.cuitEmpresa.findMany({
-    where: { userId, cuit },
+    where: { userId, cuit: normalizedCuit },
     orderBy: { createdAt: "asc" },
     select: { value: true },
   });
@@ -37,9 +47,10 @@ export async function getCuitSucursales(
   userId: string,
   cuit: string | null | undefined,
 ): Promise<string[]> {
-  if (!cuit?.trim()) return [];
+  const normalizedCuit = normalizeCuitKey(cuit);
+  if (!normalizedCuit) return [];
   const rows = await prisma.cuitSucursal.findMany({
-    where: { userId, cuit },
+    where: { userId, cuit: normalizedCuit },
     orderBy: { createdAt: "asc" },
     select: { value: true },
   });
@@ -54,7 +65,11 @@ export async function getCuitAssociationsForCuits(
   sucursalesByCuit: Map<string, string[]>;
 }> {
   const uniqueCuits = [
-    ...new Set(cuits.filter((c): c is string => Boolean(c?.trim()))),
+    ...new Set(
+      cuits
+        .map(normalizeCuitKey)
+        .filter((c): c is string => c != null),
+    ),
   ];
   const empresasByCuit = new Map<string, string[]>();
   const sucursalesByCuit = new Map<string, string[]>();
@@ -94,7 +109,7 @@ export async function upsertCuitEmpresa(
   cuit: string | null | undefined,
   value: string | null | undefined,
 ): Promise<void> {
-  const normalizedCuit = cuit?.trim();
+  const normalizedCuit = normalizeCuitKey(cuit);
   const normalizedValue = normalizeValue(value);
   if (!normalizedCuit || !normalizedValue) return;
 
@@ -116,7 +131,7 @@ export async function upsertCuitSucursal(
   cuit: string | null | undefined,
   value: string | null | undefined,
 ): Promise<void> {
-  const normalizedCuit = cuit?.trim();
+  const normalizedCuit = normalizeCuitKey(cuit);
   const normalizedValue = normalizeValue(value);
   if (!normalizedCuit || !normalizedValue) return;
 
@@ -204,7 +219,7 @@ export async function setCuitEmpresas(
   cuit: string | null | undefined,
   values: string[],
 ): Promise<void> {
-  const normalizedCuit = cuit?.trim();
+  const normalizedCuit = normalizeCuitKey(cuit);
   if (!normalizedCuit) return;
 
   await prisma.$transaction(async (tx) => {
@@ -217,7 +232,7 @@ export async function setCuitSucursales(
   cuit: string | null | undefined,
   values: string[],
 ): Promise<void> {
-  const normalizedCuit = cuit?.trim();
+  const normalizedCuit = normalizeCuitKey(cuit);
   if (!normalizedCuit) return;
 
   await prisma.$transaction(async (tx) => {
@@ -231,7 +246,7 @@ export async function setCuitAssociations(
   empresas: string[],
   sucursales: string[],
 ): Promise<void> {
-  const normalizedCuit = cuit?.trim();
+  const normalizedCuit = normalizeCuitKey(cuit);
   if (!normalizedCuit) return;
 
   await prisma.$transaction(async (tx) => {
