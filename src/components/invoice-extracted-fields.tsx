@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { useCallback, useEffect, useState } from "react";
 
-import { updateInvoiceExtractedFields } from "@/actions/invoices";
+import {
+  setInvoiceEmpresaSucursal,
+  updateInvoiceExtractedFields,
+} from "@/actions/invoices";
+import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -70,12 +74,64 @@ export function InvoiceExtractedFields({
   const [editing, setEditing] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [draftEmpresa, setDraftEmpresa] = useState(
+    invoiceProp.empresa ?? "",
+  );
+  const [draftSucursal, setDraftSucursal] = useState(
+    invoiceProp.sucursal ?? "",
+  );
+  const [assocSaving, setAssocSaving] = useState(false);
 
   useEffect(() => {
     setDisplayInvoice(invoiceProp);
   }, [invoiceProp]);
 
+  useEffect(() => {
+    setDraftEmpresa(displayInvoice.empresa ?? "");
+    setDraftSucursal(displayInvoice.sucursal ?? "");
+  }, [displayInvoice.id, displayInvoice.empresa, displayInvoice.sucursal]);
+
   const invoice = displayInvoice;
+
+  const empresaOpts = invoice.cuitEmpresaOptions ?? [];
+  const sucursalOpts = invoice.cuitSucursalOptions ?? [];
+
+  const persistEmpresaSucursalTabs = useCallback(
+    async (partial: {
+      empresa?: string | null;
+      sucursal?: string | null;
+    }) => {
+      setError(null);
+      const fd = new FormData();
+      fd.append("invoiceId", invoice.id);
+      fd.append(
+        "empresa",
+        (
+          partial.empresa !== undefined ? partial.empresa : invoice.empresa ?? ""
+        ).trim(),
+      );
+      fd.append(
+        "sucursal",
+        (
+          partial.sucursal !== undefined ? partial.sucursal : invoice.sucursal ?? ""
+        ).trim(),
+      );
+      setAssocSaving(true);
+      try {
+        const res = await setInvoiceEmpresaSucursal(fd);
+        if (res.ok) {
+          setDisplayInvoice(res.invoice);
+          onInvoiceUpdated?.(res.invoice);
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      } finally {
+        setAssocSaving(false);
+      }
+    },
+    [invoice.id, invoice.empresa, invoice.sucursal, onInvoiceUpdated, router],
+  );
 
   const canEdit = invoice.status !== "PROCESSING";
 
@@ -316,10 +372,19 @@ export function InvoiceExtractedFields({
                   <label htmlFor="empresa" className="text-sm font-medium">
                     Empresa
                   </label>
+                  <CuitAssociationTabs
+                    ariaLabel="Seleccionar empresa asociada al CUIT del proveedor"
+                    options={empresaOpts}
+                    value={draftEmpresa}
+                    onSelect={(next) => {
+                      setDraftEmpresa(next);
+                    }}
+                  />
                   <Input
                     id="empresa"
                     name="empresa"
-                    defaultValue={invoice.empresa ?? ""}
+                    value={draftEmpresa}
+                    onChange={(e) => setDraftEmpresa(e.target.value)}
                     placeholder="Ej. 0001"
                     autoComplete="off"
                   />
@@ -328,10 +393,19 @@ export function InvoiceExtractedFields({
                   <label htmlFor="sucursal" className="text-sm font-medium">
                     Sucursal
                   </label>
+                  <CuitAssociationTabs
+                    ariaLabel="Seleccionar sucursal asociada al CUIT del proveedor"
+                    options={sucursalOpts}
+                    value={draftSucursal}
+                    onSelect={(next) => {
+                      setDraftSucursal(next);
+                    }}
+                  />
                   <Input
                     id="sucursal"
                     name="sucursal"
-                    defaultValue={invoice.sucursal ?? ""}
+                    value={draftSucursal}
+                    onChange={(e) => setDraftSucursal(e.target.value)}
                     placeholder="Ej. 0001"
                     autoComplete="off"
                   />
@@ -425,13 +499,59 @@ export function InvoiceExtractedFields({
               <div className="bg-muted/30 px-3 py-2">
                 <p className="text-sm font-medium">Datos que debés completar</p>
               </div>
-              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
-                <dt className="text-sm font-medium text-muted-foreground">Empresa</dt>
-                <dd className="text-sm">{invoice.empresa ?? "—"}</dd>
+              <div className="flex flex-col gap-2 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">
+                  Empresa
+                </dt>
+                <dd className="space-y-2 text-sm">
+                  <CuitAssociationTabs
+                    ariaLabel="Elegí la empresa para esta factura (asociaciones por CUIT)"
+                    options={empresaOpts}
+                    value={invoice.empresa}
+                    disabled={assocSaving}
+                    onSelect={(next) =>
+                      persistEmpresaSucursalTabs({ empresa: next })
+                    }
+                  />
+                  <div>
+                    {invoice.empresa?.trim()
+                      ? invoice.empresa
+                      : empresaOpts.length > 1
+                        ? (
+                            <span className="text-muted-foreground">
+                              Elegí una opción arriba o abrí Editar.
+                            </span>
+                          )
+                        : "—"}
+                  </div>
+                </dd>
               </div>
-              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
-                <dt className="text-sm font-medium text-muted-foreground">Sucursal</dt>
-                <dd className="text-sm">{invoice.sucursal ?? "—"}</dd>
+              <div className="flex flex-col gap-2 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">
+                  Sucursal
+                </dt>
+                <dd className="space-y-2 text-sm">
+                  <CuitAssociationTabs
+                    ariaLabel="Elegí la sucursal para esta factura (asociaciones por CUIT)"
+                    options={sucursalOpts}
+                    value={invoice.sucursal}
+                    disabled={assocSaving}
+                    onSelect={(next) =>
+                      persistEmpresaSucursalTabs({ sucursal: next })
+                    }
+                  />
+                  <div>
+                    {invoice.sucursal?.trim()
+                      ? invoice.sucursal
+                      : sucursalOpts.length > 1
+                        ? (
+                            <span className="text-muted-foreground">
+                              Elegí una opción arriba o abrí Editar.
+                            </span>
+                          )
+                        : "—"}
+                  </div>
+                </dd>
               </div>
             </dl>
           </>

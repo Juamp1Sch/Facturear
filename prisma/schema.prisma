@@ -25,6 +25,8 @@ model User {
   taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
   storedFiles           StoredFile[]
   integrationConfig     IntegrationConfig?
+  cuitEmpresas           CuitEmpresa[]
+  cuitSucursales         CuitSucursal[]
   createdAt             DateTime                   @default(now()) @map("created_at")
 }
 
@@ -205,4 +207,30 @@ model IntegrationConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("integration_configs")
+}
+
+model CuitEmpresa {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cuit      String
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, cuit, value])
+  @@index([userId, cuit])
+  @@map("cuit_empresas")
+}
+
+model CuitSucursal {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cuit      String
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, cuit, value])
+  @@index([userId, cuit])
+  @@map("cuit_sucursales")
 }

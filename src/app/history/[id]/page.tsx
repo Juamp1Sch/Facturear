@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { resolveTaxChartAccountsForUser } from "@/lib/tax-chart-account";
 import { getSignedReadUrl } from "@/lib/storage";
+import { resolveEmpresaSucursalForInvoice } from "@/lib/cuit-associations";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
 export const dynamic = "force-dynamic";
@@ -59,18 +60,22 @@ export default async function InvoiceDetailPage({
           },
         ];
 
-  const [documentParts, taxChartAccounts, apiConfigured] = await Promise.all([
-    Promise.all(
-      fileRows.map(async (f) => ({
-        mimeType: f.mimeType,
-        previewUrl: await getSignedReadUrl(f.fileKey),
-      })),
-    ),
-    resolveTaxChartAccountsForUser(session.user.id),
-    isApiConfiguredForUser(session.user.id),
-  ]);
+  const [documentParts, taxChartAccounts, apiConfigured, cuitAssociations] =
+    await Promise.all([
+      Promise.all(
+        fileRows.map(async (f) => ({
+          mimeType: f.mimeType,
+          previewUrl: await getSignedReadUrl(f.fileKey),
+        })),
+      ),
+      resolveTaxChartAccountsForUser(session.user.id),
+      isApiConfiguredForUser(session.user.id),
+      resolveEmpresaSucursalForInvoice(session.user.id, invoice.providerCuit),
+    ]);
 
   const data = JSON.parse(JSON.stringify(invoice)) as SerializedInvoiceDetail;
+  data.cuitEmpresaOptions = cuitAssociations.empresas;
+  data.cuitSucursalOptions = cuitAssociations.sucursales;
   data.files = fileRows.map((f, i) => ({
     partIndex: f.partIndex,
     fileKey: f.fileKey,

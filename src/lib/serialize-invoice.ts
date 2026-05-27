@@ -4,6 +4,11 @@ import type {
   SerializedInvoiceFilePart,
 } from "@/types/invoice";
 
+export type CuitAssociationOptionMaps = {
+  empresasByCuit: Map<string, string[]>;
+  sucursalesByCuit: Map<string, string[]>;
+};
+
 type InvoiceWithRelations = {
   id: string;
   batchId: string | null;
@@ -52,6 +57,7 @@ type InvoiceWithRelations = {
 
 export async function serializeInvoiceForBatch(
   invoice: InvoiceWithRelations,
+  cuitOptions?: CuitAssociationOptionMaps,
 ): Promise<SerializedBatchInvoice> {
   const filesSorted = [...invoice.files].sort(
     (a, b) => a.partIndex - b.partIndex,
@@ -67,8 +73,19 @@ export async function serializeInvoiceForBatch(
   );
 
   const base = JSON.parse(JSON.stringify(invoice)) as Record<string, unknown>;
+  const cuit = invoice.providerCuit;
+  const cuitEmpresaOptions =
+    cuit && cuitOptions ? (cuitOptions.empresasByCuit.get(cuit) ?? []) : [];
+  const cuitSucursalOptions =
+    cuit && cuitOptions ? (cuitOptions.sucursalesByCuit.get(cuit) ?? []) : [];
+
   return {
-    ...(base as Omit<SerializedBatchInvoice, "files">),
+    ...(base as Omit<
+      SerializedBatchInvoice,
+      "files" | "cuitEmpresaOptions" | "cuitSucursalOptions"
+    >),
+    cuitEmpresaOptions,
+    cuitSucursalOptions,
     createdAt:
       invoice.createdAt instanceof Date
         ? invoice.createdAt.toISOString()
