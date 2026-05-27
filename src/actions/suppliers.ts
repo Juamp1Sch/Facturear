@@ -215,6 +215,11 @@ export async function updateSupplier(formData: FormData): Promise<UpdateSupplier
     return { ok: false, error: "No se encontró el proveedor." };
   }
 
+  const code = formText(formData.get("code"));
+  if (!code) {
+    return { ok: false, error: "El código es obligatorio." };
+  }
+
   const name = formText(formData.get("name"));
   if (!name) {
     return { ok: false, error: "El nombre es obligatorio." };
@@ -230,14 +235,35 @@ export async function updateSupplier(formData: FormData): Promise<UpdateSupplier
   const address = formText(formData.get("address"));
   const locality = formText(formData.get("locality"));
 
-  await prisma.supplier.update({
-    where: { id: supplierId },
-    data: {
-      name,
-      cuit: cuitValidation.normalized,
-      address,
-      locality,
-    },
+  const codeChanged = code !== existing.code;
+  if (codeChanged) {
+    const duplicate = await prisma.supplier.findFirst({
+      where: { userId: session.user.id, code, NOT: { id: supplierId } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return { ok: false, error: `Ya existe un proveedor con el código «${code}».` };
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.supplier.update({
+      where: { id: supplierId },
+      data: {
+        code,
+        name,
+        cuit: cuitValidation.normalized,
+        address,
+        locality,
+      },
+    });
+
+    if (codeChanged) {
+      await tx.invoice.updateMany({
+        where: { userId: session.user.id, supplierCode: existing.code },
+        data: { supplierCode: code },
+      });
+    }
   });
 
   await syncInvoiceSupplierCodesForUser(session.user.id);

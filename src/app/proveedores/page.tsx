@@ -42,8 +42,8 @@ export default async function ProveedoresPage({
     <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
       <ProveedoresShell>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Listado de proveedores importados o editados manualmente. El código no se puede cambiar;
-          el resto de los datos podés ajustarlos con el ícono de lápiz.
+          Listado de proveedores importados o editados manualmente. Podés ajustar los datos con el
+          ícono de lápiz; si cambiás el código, te pediremos confirmación antes de guardar.
         </p>
         <SuppliersSearchBar initialQuery={searchQuery} />
         {searchQuery ? (
