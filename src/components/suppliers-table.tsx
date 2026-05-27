@@ -31,6 +31,8 @@ export function SuppliersTable({
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const confirmDialogRef = useRef<HTMLDialogElement>(null);
+  const pendingSubmitRef = useRef<FormData | null>(null);
   const [editing, setEditing] = useState<SerializedSupplier | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
@@ -42,10 +44,26 @@ export function SuppliersTable({
   }, [editing]);
 
   const closeDialog = useCallback(() => {
+    confirmDialogRef.current?.close();
+    pendingSubmitRef.current = null;
     dialogRef.current?.close();
     setEditing(null);
     setFormError(null);
   }, []);
+
+  const submitUpdate = useCallback(
+    async (formData: FormData) => {
+      setFormError(null);
+      const res = await updateSupplier(formData);
+      if (res.ok) {
+        closeDialog();
+        router.refresh();
+      } else {
+        setFormError(res.error);
+      }
+    },
+    [closeDialog, router],
+  );
 
   if (suppliers.length === 0) {
     const q = searchQuery.trim();
@@ -118,10 +136,6 @@ export function SuppliersTable({
         {editing ? (
           <div className="p-5">
             <h2 className="text-lg font-semibold tracking-tight">Editar proveedor</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Código <span className="font-medium text-foreground">{editing.code}</span> (no se
-              puede cambiar)
-            </p>
 
             {formError ? (
               <div className="mt-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -132,19 +146,35 @@ export function SuppliersTable({
             <form
               key={formKey}
               className="mt-4 space-y-3"
-              action={async (formData) => {
-                setFormError(null);
-                const res = await updateSupplier(formData);
-                if (res.ok) {
-                  closeDialog();
-                  router.refresh();
-                } else {
-                  setFormError(res.error);
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.currentTarget);
+                const newCode = String(formData.get("code") ?? "").trim();
+                if (newCode !== editing.code) {
+                  pendingSubmitRef.current = formData;
+                  confirmDialogRef.current?.showModal();
+                  return;
                 }
+                await submitUpdate(formData);
               }}
             >
               <input type="hidden" name="supplierId" value={editing.id} />
 
+              <div className="space-y-2">
+                <label htmlFor="sup-code" className="text-sm font-medium">
+                  Código
+                </label>
+                <Input
+                  id="sup-code"
+                  name="code"
+                  required
+                  defaultValue={editing.code}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Si lo cambiás, las facturas vinculadas se actualizarán con el nuevo código.
+                </p>
+              </div>
               <div className="space-y-2">
                 <label htmlFor="sup-name" className="text-sm font-medium">
                   Nombre
@@ -189,6 +219,46 @@ export function SuppliersTable({
             </form>
           </div>
         ) : null}
+      </dialog>
+
+      <dialog
+        ref={confirmDialogRef}
+        className="fixed left-1/2 top-1/2 z-[60] w-[min(100%-1.5rem,22rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-0 shadow-lg backdrop:bg-black/45"
+        onClose={() => {
+          pendingSubmitRef.current = null;
+        }}
+      >
+        <div className="p-5">
+          <h3 className="text-base font-semibold tracking-tight">Confirmar cambio de código</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            ¿Estás seguro que querés guardar los cambios en el código del proveedor? Esto puede
+            ocasionar diferencias con tu sistema destino.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={async () => {
+                const formData = pendingSubmitRef.current;
+                if (!formData) return;
+                confirmDialogRef.current?.close();
+                pendingSubmitRef.current = null;
+                await submitUpdate(formData);
+              }}
+            >
+              Sí, guardar
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                confirmDialogRef.current?.close();
+                pendingSubmitRef.current = null;
+              }}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
       </dialog>
     </>
   );
