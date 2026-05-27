@@ -108,10 +108,12 @@ export function UploadBatchResultsView({
   invoices,
   taxChartAccounts,
   apiConfigured,
+  onInvoiceUpdated,
 }: {
   invoices: SerializedBatchInvoice[];
   taxChartAccounts: ResolvedTaxChartAccounts;
   apiConfigured: boolean;
+  onInvoiceUpdated?: (invoice: SerializedBatchInvoice) => void;
 }) {
   const [invoiceIndex, setInvoiceIndex] = useState(0);
   const invoice = invoices[invoiceIndex];
@@ -200,7 +202,10 @@ export function UploadBatchResultsView({
           </CardContent>
         </Card>
 
-        <InvoiceExtractedFields invoice={invoice} />
+        <InvoiceExtractedFields
+          invoice={invoice}
+          onInvoiceUpdated={onInvoiceUpdated}
+        />
       </div>
 
       <InvoicePagination

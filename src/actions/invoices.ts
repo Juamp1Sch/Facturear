@@ -712,7 +712,7 @@ export async function getBatchInvoicesForUpload(
 }
 
 export type UpdateInvoiceFieldsResult =
-  | { ok: true }
+  | { ok: true; invoice: SerializedBatchInvoice }
   | { ok: false; error: string };
 
 function formText(
@@ -880,8 +880,16 @@ export async function updateInvoiceExtractedFields(
     },
   });
 
+  const [updated] = await loadSerializedBatchInvoices(session.user.id, [
+    invoiceId,
+  ]);
+  if (!updated) {
+    return { ok: false, error: "No se pudo cargar la factura actualizada." };
+  }
+
   revalidatePath("/history");
   revalidatePath("/proveedores");
+  revalidatePath("/upload");
   revalidatePath(`/history/${invoiceId}`);
-  return { ok: true };
+  return { ok: true, invoice: updated };
 }
