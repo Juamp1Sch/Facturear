@@ -23,6 +23,7 @@ import {
   type UploadBatchState,
 } from "@/actions/invoices";
 import { UploadBatchResultsView } from "@/components/upload-batch-results-view";
+import type { SerializedBatchInvoice } from "@/types/invoice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -97,6 +98,9 @@ export function UploadForm() {
     initialState,
   );
   const [showNewBatch, setShowNewBatch] = useState(false);
+  const [batchInvoices, setBatchInvoices] = useState<
+    SerializedBatchInvoice[] | null
+  >(null);
 
   const groups = useMemo(() => buildGroups(items), [items]);
   const invoiceCount = groups.length;
@@ -157,6 +161,26 @@ export function UploadForm() {
       }
     };
   }, [items]);
+
+  useEffect(() => {
+    if (state.status === "ok" && !showNewBatch) {
+      setBatchInvoices(state.invoices);
+    } else {
+      setBatchInvoices(null);
+    }
+  }, [state, showNewBatch]);
+
+  const handleInvoiceUpdated = useCallback(
+    (updated: SerializedBatchInvoice) => {
+      setBatchInvoices((prev) => {
+        const base =
+          prev ?? (state.status === "ok" ? state.invoices : null);
+        if (!base) return null;
+        return base.map((inv) => (inv.id === updated.id ? updated : inv));
+      });
+    },
+    [state],
+  );
 
   const removeItem = (id: string) => {
     setItems((prev) => {
@@ -397,9 +421,10 @@ export function UploadForm() {
 
       {batchDone && state.status === "ok" ? (
         <UploadBatchResultsView
-          invoices={state.invoices}
+          invoices={batchInvoices ?? state.invoices}
           taxChartAccounts={state.taxChartAccounts}
           apiConfigured={state.apiConfigured}
+          onInvoiceUpdated={handleInvoiceUpdated}
         />
       ) : null}
     </div>

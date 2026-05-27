@@ -3,7 +3,7 @@
 import { Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { updateInvoiceExtractedFields } from "@/actions/invoices";
 import { Button } from "@/components/ui/button";
@@ -59,14 +59,23 @@ function EditFormActions({ onCancel }: { onCancel: () => void }) {
 }
 
 export function InvoiceExtractedFields({
-  invoice,
+  invoice: invoiceProp,
+  onInvoiceUpdated,
 }: {
   invoice: SerializedInvoiceDetail;
+  onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
 }) {
   const router = useRouter();
+  const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
   const [editing, setEditing] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDisplayInvoice(invoiceProp);
+  }, [invoiceProp]);
+
+  const invoice = displayInvoice;
 
   const canEdit = invoice.status !== "PROCESSING";
 
@@ -122,6 +131,8 @@ export function InvoiceExtractedFields({
               setError(null);
               const res = await updateInvoiceExtractedFields(formData);
               if (res.ok) {
+                setDisplayInvoice(res.invoice);
+                onInvoiceUpdated?.(res.invoice);
                 setEditing(false);
                 router.refresh();
               } else {
