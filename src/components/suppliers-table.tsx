@@ -2,7 +2,7 @@
 
 import { Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { updateSupplier } from "@/actions/suppliers";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,31 @@ import {
 } from "@/components/ui/table";
 import type { SerializedSupplier } from "@/types/supplier";
 
-function cellText(v: string | null, empty = "—") {
+function cellText(v: string | null, empty = "-") {
   if (v == null || v.trim() === "") return empty;
   return v;
+}
+
+function normalizeList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const t = raw.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+function parseCsvInput(value: string): string[] {
+  if (!value.trim()) return [];
+  return normalizeList(value.split(","));
+}
+
+function listText(values: string[]): string {
+  if (values.length === 0) return "-";
+  return values.join(", ");
 }
 
 export function SuppliersTable({
@@ -36,10 +58,14 @@ export function SuppliersTable({
   const [editing, setEditing] = useState<SerializedSupplier | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
+  const [empresasDraft, setEmpresasDraft] = useState("");
+  const [sucursalesDraft, setSucursalesDraft] = useState("");
 
   useEffect(() => {
     if (!editing) return;
     setFormKey((k) => k + 1);
+    setEmpresasDraft((editing.empresas ?? []).join(", "));
+    setSucursalesDraft((editing.sucursales ?? []).join(", "));
     dialogRef.current?.showModal();
   }, [editing]);
 
@@ -65,6 +91,9 @@ export function SuppliersTable({
     [closeDialog, router],
   );
 
+  const empresasList = useMemo(() => parseCsvInput(empresasDraft), [empresasDraft]);
+  const sucursalesList = useMemo(() => parseCsvInput(sucursalesDraft), [sucursalesDraft]);
+
   if (suppliers.length === 0) {
     const q = searchQuery.trim();
     return (
@@ -85,6 +114,8 @@ export function SuppliersTable({
               <TableHead className="whitespace-nowrap">Código</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead className="whitespace-nowrap">CUIT</TableHead>
+              <TableHead>Empresas</TableHead>
+              <TableHead>Sucursales</TableHead>
               <TableHead>Dirección</TableHead>
               <TableHead>Localidad</TableHead>
               <TableHead className="w-14 text-right" aria-label="Acciones" />
@@ -98,6 +129,12 @@ export function SuppliersTable({
                   {s.name}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{cellText(s.cuit)}</TableCell>
+                <TableCell className="max-w-[160px] truncate" title={listText(s.empresas)}>
+                  {listText(s.empresas)}
+                </TableCell>
+                <TableCell className="max-w-[160px] truncate" title={listText(s.sucursales)}>
+                  {listText(s.sucursales)}
+                </TableCell>
                 <TableCell className="max-w-[180px] truncate" title={s.address ?? undefined}>
                   {cellText(s.address)}
                 </TableCell>
@@ -127,7 +164,7 @@ export function SuppliersTable({
 
       <dialog
         ref={dialogRef}
-        className="fixed left-1/2 top-1/2 z-50 w-[min(100%-1.5rem,26rem)] max-h-[min(90vh,32rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-0 shadow-lg backdrop:bg-black/45"
+        className="fixed left-1/2 top-1/2 z-50 w-[min(100%-1.5rem,32rem)] max-h-[min(90vh,36rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-0 shadow-lg backdrop:bg-black/45"
         onClose={() => {
           setEditing(null);
           setFormError(null);
@@ -149,6 +186,8 @@ export function SuppliersTable({
               onSubmit={async (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.currentTarget);
+                formData.set("empresasJson", JSON.stringify(empresasList));
+                formData.set("sucursalesJson", JSON.stringify(sucursalesList));
                 const newCode = String(formData.get("code") ?? "").trim();
                 if (newCode !== editing.code) {
                   pendingSubmitRef.current = formData;
@@ -197,6 +236,44 @@ export function SuppliersTable({
                   11 dígitos o vacío. Se usa para cruzar con facturas y como ayuda a la IA.
                 </p>
               </div>
+
+              <div className="space-y-2 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium">Asociaciones por CUIT</p>
+                <p className="text-xs text-muted-foreground">
+                  Ingresá valores separados por coma (ej. 0001, 0002).
+                </p>
+                <div className="space-y-2">
+                  <label htmlFor="sup-empresas" className="text-sm font-medium">
+                    Empresas
+                  </label>
+                  <Input
+                    id="sup-empresas"
+                    value={empresasDraft}
+                    onChange={(e) => setEmpresasDraft(e.target.value)}
+                    disabled={!editing.cuit?.trim()}
+                    placeholder={
+                      editing.cuit?.trim() ? "0001, 0002" : "Completá CUIT primero"
+                    }
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="sup-sucursales" className="text-sm font-medium">
+                    Sucursales
+                  </label>
+                  <Input
+                    id="sup-sucursales"
+                    value={sucursalesDraft}
+                    onChange={(e) => setSucursalesDraft(e.target.value)}
+                    disabled={!editing.cuit?.trim()}
+                    placeholder={
+                      editing.cuit?.trim() ? "0001, 0002" : "Completá CUIT primero"
+                    }
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label htmlFor="sup-address" className="text-sm font-medium">
                   Dirección
@@ -229,10 +306,12 @@ export function SuppliersTable({
         }}
       >
         <div className="p-5">
-          <h3 className="text-base font-semibold tracking-tight">Confirmar cambio de código</h3>
+          <h3 className="text-base font-semibold tracking-tight">
+            Confirmar cambio de código
+          </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            ¿Estás seguro que querés guardar los cambios en el código del proveedor? Esto puede
-            ocasionar diferencias con tu sistema destino.
+            ¿Estás seguro que querés guardar los cambios en el código del proveedor? Esto
+            puede ocasionar diferencias con tu sistema destino.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button

@@ -9,6 +9,11 @@ import { isDatabaseConfigured } from "@/lib/database-config";
 import { prisma } from "@/lib/db";
 import { parseSupplierMasterBuffer } from "@/lib/supplier-import-parse";
 import { buildSupplierSearchWhere } from "@/lib/supplier-search";
+import {
+  getCuitAssociationsForCuits,
+  normalizeCuitKey,
+  setCuitAssociations,
+} from "@/lib/cuit-associations";
 import { syncInvoiceSupplierCodesForUser } from "@/lib/supplier-sync";
 import type { SerializedSupplier } from "@/types/supplier";
 
@@ -174,8 +179,28 @@ export async function listSuppliersPageForUser(
     take: pageSize,
   });
 
+  const { empresasByCuit, sucursalesByCuit } =
+    await getCuitAssociationsForCuits(
+      userId,
+      rows.map((r) => r.cuit),
+    );
+
+  const suppliers: SerializedSupplier[] = rows.map((row) => {
+    const cuitKey = normalizeCuitKey(row.cuit);
+    return {
+      ...(JSON.parse(JSON.stringify(row)) as Omit<
+        SerializedSupplier,
+        "empresas" | "sucursales"
+      >),
+      empresas: cuitKey ? (empresasByCuit.get(cuitKey) ?? []).slice() : [],
+      sucursales: cuitKey
+        ? (sucursalesByCuit.get(cuitKey) ?? []).slice()
+        : [],
+    };
+  });
+
   return {
-    suppliers: JSON.parse(JSON.stringify(rows)) as SerializedSupplier[],
+    suppliers,
     total,
     page,
     totalPages,
@@ -191,6 +216,20 @@ function formText(value: FormDataEntryValue | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const t = value.trim();
   return t.length > 0 ? t : null;
+}
+
+function parseAssociationsJson(formDataEntry: FormDataEntryValue | null): string[] | null {
+  if (formDataEntry == null) return null;
+  if (typeof formDataEntry !== "string") return null;
+  const raw = formDataEntry.trim();
+  if (raw === "") return null;
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (!Array.isArray(p)) return null;
+    return p.filter((x): x is string => typeof x === "string");
+  } catch {
+    return null;
+  }
 }
 
 export async function updateSupplier(formData: FormData): Promise<UpdateSupplierResult> {
@@ -235,6 +274,33 @@ export async function updateSupplier(formData: FormData): Promise<UpdateSupplier
   const address = formText(formData.get("address"));
   const locality = formText(formData.get("locality"));
 
+  const empresasRaw = formData.get("empresasJson");
+  const sucursalesRaw = formData.get("sucursalesJson");
+  const assocFieldsBothStrings =
+    typeof empresasRaw === "string" && typeof sucursalesRaw === "string";
+
+  if (assocFieldsBothStrings) {
+    const assocEmpresasParsed = parseAssociationsJson(empresasRaw);
+    const assocSucursalesParsed = parseAssociationsJson(sucursalesRaw);
+    if (
+      assocEmpresasParsed == null ||
+      assocSucursalesParsed == null
+    ) {
+      return {
+        ok: false,
+        error:
+          "Los datos de empresas o sucursales asociadas no tienen formato válido.",
+      };
+    }
+    if (!cuitValidation.normalized) {
+      return {
+        ok: false,
+        error:
+          "Para asociar empresa y sucursal al CUIT, el campo CUIT debe estar completo.",
+      };
+    }
+  }
+
   const codeChanged = code !== existing.code;
   if (codeChanged) {
     const duplicate = await prisma.supplier.findFirst({
@@ -268,9 +334,30 @@ export async function updateSupplier(formData: FormData): Promise<UpdateSupplier
 
   await syncInvoiceSupplierCodesForUser(session.user.id);
 
+  if (assocFieldsBothStrings && cuitValidation.normalized) {
+    const assocEmpresasParsed = parseAssociationsJson(
+      empresasRaw as string,
+    );
+    const assocSucursalesParsed = parseAssociationsJson(
+      sucursalesRaw as string,
+    );
+    if (
+      assocEmpresasParsed != null &&
+      assocSucursalesParsed != null
+    ) {
+      await setCuitAssociations(
+        session.user.id,
+        cuitValidation.normalized,
+        assocEmpresasParsed,
+        assocSucursalesParsed,
+      );
+    }
+  }
+
   revalidatePath("/proveedores");
   revalidatePath("/carga-proveedores");
   revalidatePath("/history");
+  revalidatePath("/upload");
 
   return { ok: true };
 }

@@ -30,6 +30,9 @@ export type SerializedInvoiceListItem = {
   movementId: string | null;
   empresa: string | null;
   sucursal: string | null;
+  /** Valores guardados por CUIT; ausentes si el item no fue enriquecido. */
+  cuitEmpresaOptions?: string[];
+  cuitSucursalOptions?: string[];
   documentKind: string | null;
   aiConfidence: number | null;
   mimeType: string;

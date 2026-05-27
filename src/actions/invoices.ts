@@ -12,7 +12,16 @@ import {
   extractInvoiceDataFromImage,
   extractInvoiceDataFromImages,
 } from "@/lib/ai";
-import { serializeInvoiceForBatch } from "@/lib/serialize-invoice";
+import {
+  serializeInvoiceForBatch,
+  type CuitAssociationOptionMaps,
+} from "@/lib/serialize-invoice";
+import {
+  getCuitAssociationsForCuits,
+  resolveEmpresaSucursalForInvoice,
+  upsertCuitEmpresa,
+  upsertCuitSucursal,
+} from "@/lib/cuit-associations";
 import {
   resolveTaxChartAccountsForUser,
   type ResolvedTaxChartAccounts,
@@ -72,7 +81,19 @@ async function loadSerializedBatchInvoices(
   const order = new Map(invoiceIds.map((id, i) => [id, i]));
   rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
-  return Promise.all(rows.map((row) => serializeInvoiceForBatch(row)));
+  const { empresasByCuit, sucursalesByCuit } =
+    await getCuitAssociationsForCuits(
+      userId,
+      rows.map((r) => r.providerCuit),
+    );
+  const cuitOptions: CuitAssociationOptionMaps = {
+    empresasByCuit,
+    sucursalesByCuit,
+  };
+
+  return Promise.all(
+    rows.map((row) => serializeInvoiceForBatch(row, cuitOptions)),
+  );
 }
 
 async function mapWithConcurrency<T, R>(
@@ -205,6 +226,11 @@ async function applyExtractionToInvoice(
   extracted: InvoiceExtraction,
   rawOcrText: string | null,
 ): Promise<void> {
+  const prior = await prisma.invoice.findFirst({
+    where: { id: invoiceId },
+    select: { empresa: true, sucursal: true },
+  });
+
   const resolved = await resolveOrCreateInvoiceSupplier(
     userId,
     extracted.provider,
@@ -214,7 +240,16 @@ async function applyExtractionToInvoice(
   const providerCuit = resolved?.cuit ?? aiCuit;
   const supplierCode = resolved?.code ?? null;
 
-  let chartAccount =
+  let empresaOut = prior?.empresa ?? null;
+  let sucursalOut = prior?.sucursal ?? null;
+  if (providerCuit) {
+    const r = await resolveEmpresaSucursalForInvoice(userId, providerCuit);
+    if (!empresaOut?.trim() && r.autoEmpresa) empresaOut = r.autoEmpresa;
+    if (!sucursalOut?.trim() && r.autoSucursal)
+      sucursalOut = r.autoSucursal;
+  }
+
+  const chartAccount =
     (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
     (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
 
@@ -245,6 +280,8 @@ async function applyExtractionToInvoice(
       providerName: extracted.provider,
       providerCuit,
       supplierCode,
+      empresa: empresaOut,
+      sucursal: sucursalOut,
       movementId,
       documentKind,
       invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(extracted.invoice_number),
@@ -516,8 +553,12 @@ export async function uploadInvoice(formData: FormData) {
     const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
     const providerCuit = resolved?.cuit ?? aiCuit;
     const supplierCode = resolved?.code ?? null;
+    const cuitResolution = await resolveEmpresaSucursalForInvoice(
+      userId,
+      providerCuit,
+    );
 
-    let chartAccount =
+    const chartAccount =
       (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
       (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
 
@@ -553,6 +594,8 @@ export async function uploadInvoice(formData: FormData) {
         providerName: extracted.provider,
         providerCuit,
         supplierCode,
+        empresa: cuitResolution.autoEmpresa,
+        sucursal: cuitResolution.autoSucursal,
         movementId,
         documentKind,
         invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(
@@ -833,8 +876,11 @@ export async function updateInvoiceExtractedFields(
   const finalCuit = resolved?.cuit ?? providerCuit;
   const supplierCode = resolved?.code ?? null;
 
+  await upsertCuitEmpresa(session.user.id, finalCuit, empresa);
+  await upsertCuitSucursal(session.user.id, finalCuit, sucursal);
+
   const chartAccountCode = formText(formData.get("chartAccountCode"));
-  let chartAccount = chartAccountCode
+  const chartAccount = chartAccountCode
     ? await resolveChartAccountForExtraction(session.user.id, chartAccountCode, null)
     : await resolveChartAccountForSupplierCode(session.user.id, supplierCode);
 
@@ -893,3 +939,57 @@ export async function updateInvoiceExtractedFields(
   revalidatePath(`/history/${invoiceId}`);
   return { ok: true, invoice: updated };
 }
+
+export async function setInvoiceEmpresaSucursal(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  if (!invoiceId) {
+    return { ok: false, error: "Falta el identificador de la factura." };
+  }
+
+  const existing = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId: session.user.id },
+  });
+  if (!existing) {
+    return { ok: false, error: "No se encontró la factura." };
+  }
+  if (existing.status === "PROCESSING") {
+    return { ok: false, error: "La factura sigue procesándose." };
+  }
+
+  const empresa = formText(formData.get("empresa"));
+  const sucursal = formText(formData.get("sucursal"));
+
+  await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { empresa, sucursal },
+  });
+
+  await upsertCuitEmpresa(session.user.id, existing.providerCuit, empresa);
+  await upsertCuitSucursal(session.user.id, existing.providerCuit, sucursal);
+
+  const [updated] = await loadSerializedBatchInvoices(session.user.id, [
+    invoiceId,
+  ]);
+  if (!updated) {
+    return { ok: false, error: "No se pudo cargar la factura actualizada." };
+  }
+
+  revalidatePath("/history");
+  revalidatePath("/proveedores");
+  revalidatePath("/upload");
+  revalidatePath(`/history/${invoiceId}`);
+  return { ok: true, invoice: updated };
+}
+
+

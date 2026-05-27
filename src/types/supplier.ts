@@ -5,4 +5,7 @@ export type SerializedSupplier = {
   cuit: string | null;
   address: string | null;
   locality: string | null;
+  /** Empresas asociadas al CUIT (compartidas entre proveedores con mismo CUIT). */
+  empresas: string[];
+  sucursales: string[];
 };
