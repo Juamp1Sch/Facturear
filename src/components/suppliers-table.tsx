@@ -99,8 +99,8 @@ export function SuppliersTable({
     return (
       <p className="text-sm text-muted-foreground">
         {q
-          ? `Ningún proveedor coincide con «${q}». Probá otro término o limpiá la búsqueda.`
-          : "Todavía no tenés proveedores cargados. Usá la pestaña «Cargar proveedores» para importar el maestro."}
+          ? `NingÃºn proveedor coincide con Â«${q}Â». ProbÃ¡ otro tÃ©rmino o limpiÃ¡ la bÃºsqueda.`
+          : "TodavÃ­a no tenÃ©s proveedores cargados. UsÃ¡ la pestaÃ±a Â«Cargar proveedoresÂ» para importar el maestro."}
       </p>
     );
   }
@@ -111,12 +111,12 @@ export function SuppliersTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="whitespace-nowrap">Código</TableHead>
+              <TableHead className="whitespace-nowrap">CÃ³digo</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead className="whitespace-nowrap">CUIT</TableHead>
               <TableHead>Empresas</TableHead>
               <TableHead>Sucursales</TableHead>
-              <TableHead>Dirección</TableHead>
+              <TableHead>DirecciÃ³n</TableHead>
               <TableHead>Localidad</TableHead>
               <TableHead className="w-14 text-right" aria-label="Acciones" />
             </TableRow>
@@ -201,11 +201,17 @@ export function SuppliersTable({
 
               <div className="space-y-2">
                 <label htmlFor="sup-code" className="text-sm font-medium">
-                  Código
+                  CÃ³digo
                 </label>
-                <Input id="sup-code" name="code" required defaultValue={editing.code} autoComplete="off" />
+                <Input
+                  id="sup-code"
+                  name="code"
+                  required
+                  defaultValue={editing.code}
+                  autoComplete="off"
+                />
                 <p className="text-xs text-muted-foreground">
-                  Si lo cambiás, las facturas vinculadas se actualizarán con el nuevo código.
+                  Si lo cambiÃ¡s, las facturas vinculadas se actualizarÃ¡n con el nuevo cÃ³digo.
                 </p>
               </div>
               <div className="space-y-2">
@@ -222,54 +228,70 @@ export function SuppliersTable({
                   id="sup-cuit"
                   name="cuit"
                   defaultValue={editing.cuit ?? ""}
-                  placeholder="Vacío si no aplica"
+                  placeholder="VacÃ­o si no aplica"
                   inputMode="numeric"
                   autoComplete="off"
                 />
                 <p className="text-xs text-muted-foreground">
-                  11 dígitos o vacío. Se usa para cruzar con facturas y como ayuda a la IA.
+                  11 dÃ­gitos o vacÃ­o. Se usa para cruzar con facturas y como ayuda a la IA.
                 </p>
               </div>
 
               <div className="space-y-2 rounded-lg border border-border p-3">
                 <p className="text-sm font-medium">Asociaciones por CUIT</p>
-                <p className="text-xs text-muted-foreground">Ingresá valores separados por coma (ej. 0001, 0002).</p>
+                <p className="text-xs text-muted-foreground">
+                  IngresÃ¡ valores separados por coma (ej. 0001, 0002).
+                </p>
                 <div className="space-y-2">
-                  <label htmlFor="sup-empresas" className="text-sm font-medium">Empresas</label>
+                  <label htmlFor="sup-empresas" className="text-sm font-medium">
+                    Empresas
+                  </label>
                   <Input
                     id="sup-empresas"
                     value={empresasDraft}
                     onChange={(e) => setEmpresasDraft(e.target.value)}
                     disabled={!editing.cuit?.trim()}
-                    placeholder={editing.cuit?.trim() ? "0001, 0002" : "Completá CUIT primero"}
+                    placeholder={
+                      editing.cuit?.trim() ? "0001, 0002" : "CompletÃ¡ CUIT primero"
+                    }
                     autoComplete="off"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label htmlFor="sup-sucursales" className="text-sm font-medium">Sucursales</label>
+                  <label htmlFor="sup-sucursales" className="text-sm font-medium">
+                    Sucursales
+                  </label>
                   <Input
                     id="sup-sucursales"
                     value={sucursalesDraft}
                     onChange={(e) => setSucursalesDraft(e.target.value)}
                     disabled={!editing.cuit?.trim()}
-                    placeholder={editing.cuit?.trim() ? "0001, 0002" : "Completá CUIT primero"}
+                    placeholder={
+                      editing.cuit?.trim() ? "0001, 0002" : "CompletÃ¡ CUIT primero"
+                    }
                     autoComplete="off"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="sup-address" className="text-sm font-medium">Dirección</label>
+                <label htmlFor="sup-address" className="text-sm font-medium">
+                  DirecciÃ³n
+                </label>
                 <Input id="sup-address" name="address" defaultValue={editing.address ?? ""} />
               </div>
               <div className="space-y-2">
-                <label htmlFor="sup-locality" className="text-sm font-medium">Localidad</label>
+                <label htmlFor="sup-locality" className="text-sm font-medium">
+                  Localidad
+                </label>
                 <Input id="sup-locality" name="locality" defaultValue={editing.locality ?? ""} />
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button type="submit">Guardar</Button>
-                <Button type="button" variant="outline" onClick={closeDialog}>Cancelar</Button>
+                <Button type="button" variant="outline" onClick={closeDialog}>
+                  Cancelar
+                </Button>
               </div>
             </form>
           </div>
@@ -284,9 +306,12 @@ export function SuppliersTable({
         }}
       >
         <div className="p-5">
-          <h3 className="text-base font-semibold tracking-tight">Confirmar cambio de código</h3>
+          <h3 className="text-base font-semibold tracking-tight">
+            Confirmar cambio de cÃ³digo
+          </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            ¿Estás seguro que querés guardar los cambios en el código del proveedor? Esto puede ocasionar diferencias con tu sistema destino.
+            Â¿EstÃ¡s seguro que querÃ©s guardar los cambios en el cÃ³digo del proveedor? Esto
+            puede ocasionar diferencias con tu sistema destino.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
@@ -299,7 +324,7 @@ export function SuppliersTable({
                 await submitUpdate(formData);
               }}
             >
-              Sí, guardar
+              SÃ­, guardar
             </Button>
             <Button
               type="button"
