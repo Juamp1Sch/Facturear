@@ -39,11 +39,29 @@ export const invoiceExtractionSchema = z.object({
     .string()
     .nullable()
     .describe("Tipo de comprobante AFIP: A, B, C, M, E, etc."),
-  document_kind: z
-    .enum(["FACTURA", "NOTA_CREDITO", "NOTA_DEBITO"])
+  afip_comprobante_code: z
+    .string()
     .nullable()
     .describe(
-      "Tipo de documento: FACTURA, NOTA_CREDITO o NOTA_DEBITO según el encabezado del comprobante",
+      "Código de comprobante AFIP/ARCA impreso en el documento: el recuadro 'Cód. NN' / 'Código NN' (1 a 3 dígitos) que figura junto a la letra A/B/C en comprobantes fiscales electrónicos o de imprenta (ej. 01, 06, 011). SOLO devolvé este número si está realmente impreso como código de comprobante AFIP. Devolvé null si el documento es un presupuesto, nota de pedido, parte diario, remito interno u orden de compra SIN ese recuadro de código AFIP. No confundir con número de comprobante, CAE, CAI, CAEA, punto de venta, código de artículo ni teléfono.",
+    ),
+  fiscal_auth_type: z
+    .enum(["CAE", "CAEA", "CAI", "TICKET_FISCAL"])
+    .nullable()
+    .describe(
+      "Tipo de autorización fiscal detectada en el documento. CAE: comprobante electrónico con 'CAE N°' y 'Vto. CAE' al pie. CAEA: comprobante con 'CAEA' al pie. CAI: comprobante de imprenta/remito fiscal con 'CAI:' y 'Fecha Vencimiento' (típicamente esquina inferior derecha o pie). TICKET_FISCAL: ticket de controlador fiscal ('C.F.', 'Controlador Fiscal', 'TIQUE', 'Tique Factura'). null si no hay ninguna autorización fiscal legible (presupuesto, nota de pedido interna, etc.).",
+    ),
+  fiscal_auth_code: z
+    .string()
+    .nullable()
+    .describe(
+      "Número de la autorización fiscal leída (CAE, CAEA o CAI). Solo dígitos o el valor tal como aparece impreso (ej. 52076217180318). null si fiscal_auth_type es TICKET_FISCAL o no hay número legible.",
+    ),
+  document_kind: z
+    .enum(["FACTURA", "NOTA_CREDITO", "NOTA_DEBITO", "REMITO", "PRESUPUESTO"])
+    .nullable()
+    .describe(
+      "Tipo de documento según encabezado: FACTURA, NOTA_CREDITO, NOTA_DEBITO, REMITO (remito fiscal o de entrega), PRESUPUESTO (presupuesto, nota de pedido, parte diario u orden interna sin CAE/CAI/CAEA). Si hay CAE/CAI/CAEA es comprobante fiscal, no PRESUPUESTO.",
     ),
   net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
   vat_amount: z
@@ -81,3 +99,19 @@ export const invoiceExtractionSchema = z.object({
 });
 
 export type InvoiceExtraction = z.infer<typeof invoiceExtractionSchema>;
+
+/** Extracción focalizada de autorización fiscal (pie / esquina inferior). */
+export const fiscalAuthSupplementSchema = z.object({
+  fiscal_auth_type: z
+    .enum(["CAE", "CAEA", "CAI", "TICKET_FISCAL"])
+    .nullable()
+    .describe(
+      "CAE, CAEA, CAI o TICKET_FISCAL si aparece en el pie o esquina inferior del comprobante. null si no hay.",
+    ),
+  fiscal_auth_code: z
+    .string()
+    .nullable()
+    .describe("Número de CAE, CAEA o CAI (solo dígitos). null para ticket o si no se lee."),
+});
+
+export type FiscalAuthSupplement = z.infer<typeof fiscalAuthSupplementSchema>;

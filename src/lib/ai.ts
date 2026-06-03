@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 
-import { invoiceExtractionSchema, type InvoiceExtraction } from "@/lib/schemas";
+import { invoiceExtractionSchema, fiscalAuthSupplementSchema, type InvoiceExtraction } from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
   /** Proveedores del maestro con CUIT; solo si hay datos, se añade al system prompt. */
@@ -15,7 +15,14 @@ const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay var
 - invoice_number: si el encabezado AFIP muestra "Punto de Venta" / "Punto de Vta" y "Número" / "Comp. Nro" (típicamente arriba a la derecha, junto a FACTURA A/B/C), combiná ambos en NNNNN-NNNNNNNN (5 dígitos PV + guion + 8 dígitos número, con ceros a la izquierda; ej. PV 00004 y Nro 00059991 → 00004-00059991). No confundir con CAE, OC, códigos de ítem ni número de cliente. Si solo hay un número sin punto de venta, devolvé ese valor sin inventar PV.
 - Fecha: ISO YYYY-MM-DD.
 - invoice_type: letra del comprobante (A, B, C, M, E) si aparece.
-- document_kind: si el encabezado dice "FACTURA" o es factura común → "FACTURA"; "NOTA DE CRÉDITO" / "NOTA DE CREDITO" → "NOTA_CREDITO"; "NOTA DE DÉBITO" / "NOTA DE DEBITO" → "NOTA_DEBITO". Si no es claro, null (se asume factura).
+- afip_comprobante_code: el CÓDIGO DE COMPROBANTE AFIP/ARCA impreso en el documento. En comprobantes fiscales suele ser un recuadro "Cód. NN" / "Código NN" (1 a 3 dígitos) ubicado junto a la letra grande A/B/C (típicamente en el centro o arriba del comprobante; ej. 01, 06, 011). Devolvé SOLO ese número si está realmente impreso como código de comprobante AFIP. Devolvé null si es un presupuesto, nota de pedido, parte diario, remito interno, orden de compra o cualquier documento que NO tenga ese recuadro de código AFIP. NUNCA lo confundas con el número de comprobante, CAE/CAI/CAEA, punto de venta, código de artículo, número de cliente ni teléfono. Ante la duda, null.
+- fiscal_auth_type y fiscal_auth_code: autorización fiscal distinta del código de comprobante AFIP. Buscá en el PIE o esquina inferior del documento:
+  • CAE: texto "CAE N°" / "CAE:" con número y "Vto. CAE" / "Fecha Vto. CAE" (facturas electrónicas).
+  • CAEA: texto "CAEA" con número de autorización (comprobantes con CAEA).
+  • CAI: texto "CAI:" con número y "Fecha Vencimiento" (remitos fiscales de imprenta, facturas en papel autorizadas; revisá SIEMPRE el pie y la esquina inferior derecha — suele verse como "CAI: 52076217180318 - Fecha Vencimiento: DD/MM/AAAA").
+  • TICKET_FISCAL: comprobante de controlador fiscal ("C.F.", "Controlador Fiscal", "TIQUE", "Tique Factura", código de barras fiscal de ticket).
+  Devolvé fiscal_auth_type según lo que encuentres y fiscal_auth_code con el número (CAE/CAEA/CAI). Para TICKET_FISCAL, fiscal_auth_code = null. Si no hay ninguna autorización fiscal legible, ambos null. NO confundir CAE/CAI con número de comprobante ni con código AFIP.
+- document_kind: tipo según encabezado — "FACTURA", "NOTA_CREDITO", "NOTA_DEBITO", "REMITO" (si dice REMITO / letra R en recuadro), "PRESUPUESTO" (presupuesto, nota de pedido, parte diario, orden interna SIN CAE/CAI/CAEA ni código AFIP). Si hay CAE, CAI o CAEA, NO es PRESUPUESTO.
 - chart_account_code: si se incluye el plan de cuentas del usuario, elegí el código de la cuenta (efectivo, banco, mercado pago, etc.) que corresponda al medio de pago o imputación visible en la factura; si no hay plan o no hay señal, null.
 - Desglose fiscal (pie de factura / tabla de impuestos / totales): leé cada renglón por separado.
 - vat_lines: cada fila de IVA con label (ej. "IVA 21%", "IVA 10,5%") y amount. Si hay un solo importe de IVA, un solo elemento. null si no hay IVA.
@@ -115,6 +122,60 @@ export async function extractInvoiceDataFromImage(
     throw new Error("OpenAI no devolvió datos parseables.");
   }
   return parsed;
+}
+
+const FISCAL_AUTH_VISION_PROMPT = `Sos un asistente contable para Argentina. Tu ÚNICA tarea es leer la autorización fiscal impresa en el PIE o ESQUINA INFERIOR del comprobante (últimos 15% de la página).
+
+Buscá específicamente:
+- CAI: texto "CAI:" seguido de un número largo (10-20 dígitos), a menudo junto a "Fecha Vencimiento" o "Vto. CAI". Muy común en remitos fiscales (letra R) en la esquina inferior derecha.
+- CAE: "CAE N°" / "CAE:" con número y "Vto. CAE" (facturas electrónicas).
+- CAEA: "CAEA" con número.
+- TICKET_FISCAL: controlador fiscal ("C.F.", "TIQUE").
+
+Devolvé fiscal_auth_type y fiscal_auth_code. Si no hay ninguna autorización legible en el pie, ambos null.`;
+
+/**
+ * Segunda pasada de visión solo para CAE/CAEA/CAI cuando la extracción principal no los detectó.
+ * Necesaria en fotos/escaneos donde no hay texto OCR embebido.
+ */
+export async function supplementFiscalAuthFromImages(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+): Promise<{ fiscal_auth_type: InvoiceExtraction["fiscal_auth_type"]; fiscal_auth_code: string | null } | null> {
+  if (images.length === 0) return null;
+
+  const openai = getOpenAI();
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: "Enfocate en el pie de página y la esquina inferior derecha. ¿Hay CAE, CAEA o CAI impreso? Devolvé fiscal_auth_type y fiscal_auth_code.",
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await openai.beta.chat.completions.parse({
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    messages: [
+      { role: "system", content: FISCAL_AUTH_VISION_PROMPT },
+      { role: "user", content: userContent },
+    ],
+    response_format: zodResponseFormat(
+      fiscalAuthSupplementSchema,
+      "fiscal_auth_supplement",
+    ),
+  });
+
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed?.fiscal_auth_type) return null;
+  return {
+    fiscal_auth_type: parsed.fiscal_auth_type,
+    fiscal_auth_code: parsed.fiscal_auth_code,
+  };
 }
 
 export async function extractInvoiceDataFromImages(

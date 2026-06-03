@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import { formatCreatedAtArgentina } from "@/lib/history-search";
 import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
+import { documentClassLabel, fiscalAuthTypeLabel, isPresupuestoDocument } from "@/lib/document-class";
+import { documentKindLabel } from "@/lib/comprobante-code";
 import type { SerializedInvoiceListItem } from "@/types/invoice";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -20,6 +22,9 @@ export type HistoryExportRow = {
   Proveedor: string;
   CUIT: string;
   "Cód. proveedor": string;
+  "Tipo doc": string;
+  "Cód. AFIP": string;
+  Autorización: string;
   "Nº comprobante": string;
   Total: string;
   Estado: string;
@@ -27,6 +32,28 @@ export type HistoryExportRow = {
   "Cuenta nombre": string;
   "ID movimiento": string;
 };
+
+function formatExportAuthorization(
+  inv: SerializedInvoiceListItem,
+): string {
+  const label = fiscalAuthTypeLabel(inv.fiscalAuthType);
+  if (!label) return "";
+  if (inv.fiscalAuthCode?.trim()) {
+    return `${label} ${inv.fiscalAuthCode.trim()}`;
+  }
+  return label;
+}
+
+function formatExportDocumentType(inv: SerializedInvoiceListItem): string {
+  if (isPresupuestoDocument(inv.documentKind, inv.documentClass)) {
+    return documentKindLabel("PRESUPUESTO");
+  }
+  const kind = documentKindLabel(inv.documentKind);
+  const cls = documentClassLabel(inv.documentClass);
+  if (kind !== "—" && cls) return `${kind} (${cls})`;
+  if (cls) return cls;
+  return kind !== "—" ? kind : "";
+}
 
 export function invoiceToExportRow(
   inv: SerializedInvoiceListItem,
@@ -37,6 +64,9 @@ export function invoiceToExportRow(
     Proveedor: inv.providerName?.trim() || "",
     CUIT: inv.providerCuit ?? "",
     "Cód. proveedor": inv.supplierCode ?? "",
+    "Tipo doc": formatExportDocumentType(inv),
+    "Cód. AFIP": inv.afipCode ?? "",
+    Autorización: formatExportAuthorization(inv),
     "Nº comprobante": inv.invoiceNumber ?? "",
     Total: formatMoney(inv.totalAmount),
     Estado: STATUS_LABEL[inv.status] ?? inv.status,
@@ -59,6 +89,9 @@ const EXPORT_COLUMNS: (keyof HistoryExportRow)[] = [
   "Proveedor",
   "CUIT",
   "Cód. proveedor",
+  "Tipo doc",
+  "Cód. AFIP",
+  "Autorización",
   "Nº comprobante",
   "Total",
   "Estado",

@@ -12,6 +12,7 @@ import {
   extractInvoiceDataFromImage,
   extractInvoiceDataFromImages,
 } from "@/lib/ai";
+import { enrichExtractionFiscalAuth } from "@/lib/enrich-extraction-fiscal-auth";
 import {
   serializeInvoiceForBatch,
   type CuitAssociationOptionMaps,
@@ -46,6 +47,11 @@ import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
 import { sumTaxLines } from "@/lib/tax-breakdown";
 import { parseDocumentKind } from "@/lib/comprobante-code";
+import {
+  parseFiscalDocumentClass,
+  resolveDocumentClassification,
+} from "@/lib/document-class";
+import { rememberSupplierAlias } from "@/lib/supplier-alias";
 import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -187,7 +193,10 @@ async function extractFromParts(
         .map((p) => `--- Parte ${p.partNum} ---\n${p.text}`)
         .join("\n\n");
       const extracted = await extractInvoiceData(combined, extractOpts);
-      return { extracted, rawOcrText: combined };
+      const enriched = await enrichExtractionFiscalAuth(extracted, {
+        rawOcrText: combined,
+      });
+      return { extracted: enriched, rawOcrText: combined };
     }
   }
 
@@ -217,7 +226,11 @@ async function extractFromParts(
     ocrNotes.length > 0
       ? `${ocrNotes.join("\n\n")}\n\n[Campos inferidos por visión en ${parts.length} parte(s).]`
       : `[${parts.length} parte(s): campos inferidos por visión.]`;
-  return { extracted, rawOcrText };
+  const enriched = await enrichExtractionFiscalAuth(extracted, {
+    rawOcrText,
+    visionImages,
+  });
+  return { extracted: enriched, rawOcrText };
 }
 
 async function applyExtractionToInvoice(
@@ -255,7 +268,12 @@ async function applyExtractionToInvoice(
 
   const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
   const movementId = await allocateUniqueMovementId(invoiceDate);
-  const documentKind = parseDocumentKind(extracted.document_kind);
+  const doc = resolveDocumentClassification(extracted, rawOcrText);
+  const documentKind = doc.documentKind;
+  const documentClass = doc.documentClass;
+  const afipCode = doc.afipCode;
+  const fiscalAuthType = doc.fiscalAuthType;
+  const fiscalAuthCode = doc.fiscalAuthCode;
 
   const vatFromLines = sumTaxLines(extracted.vat_lines);
   const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
@@ -268,6 +286,10 @@ async function applyExtractionToInvoice(
   };
   if (supplierCode) aiPayloadOut.supplier_code = supplierCode;
   if (resolved?.cuit) aiPayloadOut.cuit = providerCuit;
+  aiPayloadOut.document_class = documentClass;
+  aiPayloadOut.afip_comprobante_code = afipCode;
+  aiPayloadOut.fiscal_auth_type = fiscalAuthType;
+  aiPayloadOut.fiscal_auth_code = fiscalAuthCode;
   if (chartAccount) {
     aiPayloadOut.chart_account_code = chartAccount.code;
     aiPayloadOut.chart_account_name = chartAccount.name;
@@ -284,6 +306,10 @@ async function applyExtractionToInvoice(
       sucursal: sucursalOut,
       movementId,
       documentKind,
+      documentClass,
+      afipCode,
+      fiscalAuthType,
+      fiscalAuthCode,
       invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(extracted.invoice_number),
       invoiceType: extracted.invoice_type,
       invoiceDate,
@@ -523,11 +549,15 @@ export async function uploadInvoice(formData: FormData) {
 
     let rawOcrText: string | null = null;
     let extracted: InvoiceExtraction;
+    let visionImages:
+      | { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[]
+      | undefined;
 
     if (mimeType === "application/pdf") {
       const pdfText = await runOcr(buffer, mimeType);
       if (pdfEmbeddedTextIsWeak(pdfText)) {
         const pagePng = await rasterizePdfFirstPagePng(buffer);
+        visionImages = [{ buffer: pagePng, mimeType: "image/png" }];
         extracted = await extractInvoiceDataFromImage(pagePng, "image/png", extractOpts);
         rawOcrText =
           pdfText.trim().length > 0
@@ -538,12 +568,21 @@ export async function uploadInvoice(formData: FormData) {
         extracted = await extractInvoiceData(pdfText, extractOpts);
       }
     } else {
+      visionImages = [
+        { buffer, mimeType: mimeType as "image/jpeg" | "image/png" },
+      ];
       extracted = await extractInvoiceDataFromImage(
         buffer,
         mimeType as "image/jpeg" | "image/png",
         extractOpts,
       );
+      rawOcrText = "[Campos inferidos por visión.]";
     }
+
+    extracted = await enrichExtractionFiscalAuth(extracted, {
+      rawOcrText,
+      visionImages,
+    });
 
     const resolved = await resolveOrCreateInvoiceSupplier(
       userId,
@@ -564,7 +603,12 @@ export async function uploadInvoice(formData: FormData) {
 
     const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
     const movementId = await allocateUniqueMovementId(invoiceDate);
-    const documentKind = parseDocumentKind(extracted.document_kind);
+    const doc = resolveDocumentClassification(extracted, rawOcrText);
+    const documentKind = doc.documentKind;
+    const documentClass = doc.documentClass;
+    const afipCode = doc.afipCode;
+    const fiscalAuthType = doc.fiscalAuthType;
+    const fiscalAuthCode = doc.fiscalAuthCode;
 
     const vatFromLines = sumTaxLines(extracted.vat_lines);
     const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
@@ -582,6 +626,10 @@ export async function uploadInvoice(formData: FormData) {
     if (resolved?.cuit) {
       aiPayloadOut.cuit = providerCuit;
     }
+    aiPayloadOut.document_class = documentClass;
+    aiPayloadOut.afip_comprobante_code = afipCode;
+    aiPayloadOut.fiscal_auth_type = fiscalAuthType;
+    aiPayloadOut.fiscal_auth_code = fiscalAuthCode;
     if (chartAccount) {
       aiPayloadOut.chart_account_code = chartAccount.code;
       aiPayloadOut.chart_account_name = chartAccount.name;
@@ -598,6 +646,10 @@ export async function uploadInvoice(formData: FormData) {
         sucursal: cuitResolution.autoSucursal,
         movementId,
         documentKind,
+        documentClass,
+        afipCode,
+        fiscalAuthType,
+        fiscalAuthCode,
         invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(
           extracted.invoice_number,
         ),
@@ -848,6 +900,12 @@ export async function updateInvoiceExtractedFields(
   const sucursal = formText(formData.get("sucursal"));
   const documentKindRaw = formText(formData.get("documentKind"));
   const documentKind = parseDocumentKind(documentKindRaw);
+  const documentClassRaw = formText(formData.get("documentClass"));
+  const documentClass =
+    documentKind === "PRESUPUESTO"
+      ? null
+      : parseFiscalDocumentClass(documentClassRaw) ??
+        parseFiscalDocumentClass(existing.documentClass);
 
   let netAmount: Prisma.Decimal | null;
   let vatAmount: Prisma.Decimal | null;
@@ -876,6 +934,10 @@ export async function updateInvoiceExtractedFields(
   const finalCuit = resolved?.cuit ?? providerCuit;
   const supplierCode = resolved?.code ?? null;
 
+  // Recordar el alias nombre→proveedor para que futuros presupuestos con el
+  // mismo membrete (aunque abreviado) se asocien automáticamente.
+  await rememberSupplierAlias(session.user.id, providerName, supplierCode);
+
   await upsertCuitEmpresa(session.user.id, finalCuit, empresa);
   await upsertCuitSucursal(session.user.id, finalCuit, sucursal);
 
@@ -896,6 +958,8 @@ export async function updateInvoiceExtractedFields(
       ? (existing.aiPayload as Record<string, unknown>)
       : {};
   const nextPayload = { ...existingPayload };
+  if (documentClass) nextPayload.document_class = documentClass;
+  else delete nextPayload.document_class;
   if (chartAccount) {
     nextPayload.chart_account_code = chartAccount.code;
     nextPayload.chart_account_name = chartAccount.name;
@@ -913,6 +977,7 @@ export async function updateInvoiceExtractedFields(
       empresa,
       sucursal,
       documentKind,
+      documentClass,
       invoiceNumber,
       invoiceType,
       invoiceDate,
