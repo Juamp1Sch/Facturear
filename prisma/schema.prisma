@@ -19,6 +19,7 @@ model User {
   passwordResetTokenExpiresAt  DateTime? @map("password_reset_token_expires_at")
   invoices      Invoice[]
   suppliers     Supplier[]
+  supplierAliases       SupplierAlias[]
   chartAccounts         ChartAccount[]
   supplierChartAccounts SupplierChartAccountLink[]
   taxChartAccountSettings TaxChartAccountSettings?
@@ -69,6 +70,10 @@ model Invoice {
   empresa             String?            @map("empresa")
   sucursal            String?            @map("sucursal")
   documentKind        String?            @map("document_kind")
+  documentClass       String?            @map("document_class")
+  afipCode            String?            @map("afip_code")
+  fiscalAuthType      String?            @map("fiscal_auth_type")
+  fiscalAuthCode      String?            @map("fiscal_auth_code")
   status              InvoiceStatus      @default(PROCESSING)
   aiConfidence        Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")
@@ -136,6 +141,23 @@ model Supplier {
 
   @@unique([userId, code])
   @@map("suppliers")
+}
+
+/// Alias aprendidos: nombre/abreviatura detectada en un documento (sobre todo
+/// presupuestos sin CUIT) → código de proveedor del maestro. Permite asociar
+/// presupuestos al mismo proveedor aunque el membrete venga abreviado.
+model SupplierAlias {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aliasKey     String   @map("alias_key")
+  supplierCode String   @map("supplier_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, aliasKey])
+  @@index([userId, supplierCode])
+  @@map("supplier_aliases")
 }
 
 model ChartAccount {

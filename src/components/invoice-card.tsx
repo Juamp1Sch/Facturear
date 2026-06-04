@@ -11,6 +11,8 @@ import {
 import { formatCreatedAtDateArgentina } from "@/lib/history-search";
 import { formatInvoiceCalendarDate } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
+import { documentClassLabel, isPresupuestoDocument } from "@/lib/document-class";
+import { documentKindLabel } from "@/lib/comprobante-code";
 import type { SerializedInvoiceListItem } from "@/types/invoice";
 
 const statusLabel: Record<string, string> = {
@@ -43,6 +45,13 @@ export function InvoiceCard({ invoice }: { invoice: SerializedInvoiceListItem })
               <Badge variant={statusVariant(invoice.status)}>
                 {statusLabel[invoice.status] ?? invoice.status}
               </Badge>
+              {isPresupuestoDocument(invoice.documentKind, invoice.documentClass) ? (
+                <Badge variant="outline">Presupuesto</Badge>
+              ) : invoice.documentClass ? (
+                <Badge variant="outline">
+                  {documentClassLabel(invoice.documentClass)}
+                </Badge>
+              ) : null}
               {invoice.destinationUploadedAt ? (
                 <Badge variant="outline">Cargada</Badge>
               ) : null}

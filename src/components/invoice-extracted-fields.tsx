@@ -22,17 +22,55 @@ import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import type { DocumentKind } from "@/lib/comprobante-code";
+import {
+  DOCUMENT_KIND_OPTIONS,
+  documentKindLabel,
+  isPresupuestoKind,
+} from "@/lib/comprobante-code";
+import {
+  DOCUMENT_CLASS_OPTIONS,
+  documentClassLabel,
+  fiscalAuthTypeLabel,
+  isPresupuestoDocument,
+  parseDocumentClass,
+  parseFiscalDocumentClass,
+} from "@/lib/document-class";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
-const DOCUMENT_KIND_OPTIONS: { value: DocumentKind; label: string }[] = [
-  { value: "FACTURA", label: "Factura" },
-  { value: "NOTA_CREDITO", label: "Nota de crédito" },
-  { value: "NOTA_DEBITO", label: "Nota de débito" },
-];
+function effectiveDocumentKind(invoice: SerializedInvoiceDetail): DocumentKind {
+  if (isPresupuestoKind(invoice.documentKind)) return "PRESUPUESTO";
+  if (parseDocumentClass(invoice.documentClass) === "PRESUPUESTO") {
+    return "PRESUPUESTO";
+  }
+  const kind = invoice.documentKind as DocumentKind | null;
+  if (kind && DOCUMENT_KIND_OPTIONS.some((o) => o.value === kind)) {
+    return kind;
+  }
+  return "FACTURA";
+}
 
-function documentKindLabel(kind: string | null): string {
-  const opt = DOCUMENT_KIND_OPTIONS.find((o) => o.value === kind);
-  return opt?.label ?? "—";
+function documentClassBadgeClass(value: string | null): string {
+  const parsed = parseFiscalDocumentClass(value);
+  if (parsed === "REMITO_FISCAL") {
+    return "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300";
+  }
+  if (parsed === "TICKET_FISCAL") {
+    return "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300";
+  }
+  if (parsed === "FACTURA_FISCAL") {
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
+  }
+  return "bg-muted text-muted-foreground";
+}
+
+function fiscalAuthDisplay(
+  fiscalAuthType: string | null,
+  fiscalAuthCode: string | null,
+): string | null {
+  const label = fiscalAuthTypeLabel(fiscalAuthType);
+  if (!label) return null;
+  if (fiscalAuthCode?.trim()) return `${label} ${fiscalAuthCode.trim()}`;
+  return label;
 }
 
 function amountInputDefault(value: string | null | undefined): string {
@@ -92,6 +130,13 @@ export function InvoiceExtractedFields({
   }, [displayInvoice.id, displayInvoice.empresa, displayInvoice.sucursal]);
 
   const invoice = displayInvoice;
+  const kindForDisplay = effectiveDocumentKind(invoice);
+  const isPresupuesto = isPresupuestoDocument(invoice.documentKind, invoice.documentClass);
+  const [draftDocumentKind, setDraftDocumentKind] = useState<DocumentKind>(kindForDisplay);
+
+  useEffect(() => {
+    setDraftDocumentKind(effectiveDocumentKind(displayInvoice));
+  }, [displayInvoice.id, displayInvoice.documentKind, displayInvoice.documentClass]);
 
   const empresaOpts = invoice.cuitEmpresaOptions ?? [];
   const sucursalOpts = invoice.cuitSucursalOptions ?? [];
@@ -289,7 +334,10 @@ export function InvoiceExtractedFields({
                 <select
                   id="documentKind"
                   name="documentKind"
-                  defaultValue={invoice.documentKind ?? "FACTURA"}
+                  value={draftDocumentKind}
+                  onChange={(e) =>
+                    setDraftDocumentKind(e.target.value as DocumentKind)
+                  }
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
                   {DOCUMENT_KIND_OPTIONS.map((opt) => (
@@ -299,6 +347,28 @@ export function InvoiceExtractedFields({
                   ))}
                 </select>
               </div>
+              {draftDocumentKind !== "PRESUPUESTO" ? (
+              <div className="space-y-2">
+                <label htmlFor="documentClass" className="text-sm font-medium">
+                  Clase (fiscal)
+                </label>
+                <select
+                  id="documentClass"
+                  name="documentClass"
+                  defaultValue={
+                    parseFiscalDocumentClass(invoice.documentClass) ??
+                    "FACTURA_FISCAL"
+                  }
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {DOCUMENT_CLASS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              ) : null}
               <div className="space-y-2">
                 <label htmlFor="netAmount" className="text-sm font-medium">
                   Neto
@@ -467,8 +537,47 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Tipo documento</dt>
-              <dd className="text-sm">{documentKindLabel(invoice.documentKind)}</dd>
+              <dd className="text-sm">
+                <span
+                  className={
+                    isPresupuesto
+                      ? "inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                      : undefined
+                  }
+                >
+                  {documentKindLabel(kindForDisplay)}
+                </span>
+              </dd>
             </div>
+            {!isPresupuesto ? (
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Clase (fiscal)</dt>
+              <dd className="text-sm">
+                {invoice.documentClass ? (
+                <span
+                  className={
+                    "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium " +
+                    documentClassBadgeClass(invoice.documentClass)
+                  }
+                >
+                  {documentClassLabel(invoice.documentClass)}
+                </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+                {invoice.afipCode ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    Cód. AFIP {invoice.afipCode}
+                  </span>
+                ) : null}
+                {fiscalAuthDisplay(invoice.fiscalAuthType, invoice.fiscalAuthCode) ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {fiscalAuthDisplay(invoice.fiscalAuthType, invoice.fiscalAuthCode)}
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+            ) : null}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Neto</dt>
               <dd className="text-sm">{formatMoney(invoice.netAmount)}</dd>

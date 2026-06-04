@@ -28,6 +28,10 @@ type InvoiceWithRelations = {
   empresa: string | null;
   sucursal: string | null;
   documentKind: string | null;
+  documentClass: string | null;
+  afipCode: string | null;
+  fiscalAuthType: string | null;
+  fiscalAuthCode: string | null;
   aiConfidence: number | null;
   mimeType: string;
   originalFileUrl: string;

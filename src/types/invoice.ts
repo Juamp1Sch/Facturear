@@ -34,6 +34,10 @@ export type SerializedInvoiceListItem = {
   cuitEmpresaOptions?: string[];
   cuitSucursalOptions?: string[];
   documentKind: string | null;
+  documentClass: string | null;
+  afipCode: string | null;
+  fiscalAuthType: string | null;
+  fiscalAuthCode: string | null;
   aiConfidence: number | null;
   mimeType: string;
   accountingAccount: SerializedAccountingAccount | null;
