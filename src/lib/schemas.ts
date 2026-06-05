@@ -99,6 +99,18 @@ export const invoiceExtractionSchema = z.object({
     .describe(
       "Cada percepción por separado (IIBB, percepción IVA, etc.) con su importe. null si no hay percepciones.",
     ),
+  discount_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Total de bonificaciones/descuentos del comprobante en POSITIVO (magnitud). Suma de discount_lines si las devolvés. NO entra en net+IVA+percepciones≈total.",
+    ),
+  discount_lines: z
+    .array(taxBreakdownLineSchema)
+    .nullable()
+    .describe(
+      "Cada bonificación o descuento con importe > 0 (ej. BONIFICACION GENERAL, BONIFICACION ESPECIAL, Descuento). Devolvé amount en POSITIVO aunque esté impreso negativo. null si no hay bonificaciones.",
+    ),
   total_amount: z
     .number()
     .nullable()
@@ -171,3 +183,46 @@ export const amountsSupplementSchema = z.object({
 });
 
 export type AmountsSupplement = z.infer<typeof amountsSupplementSchema>;
+
+/** Extracción focalizada de bonificaciones / descuentos (segunda pasada de visión). */
+export const discountLineSupplementSchema = z.object({
+  label: z
+    .string()
+    .nullable()
+    .describe(
+      'Texto del renglón (ej. "BONIFICACION GENERAL", "BONIFICACION ADICIONAL").',
+    ),
+  percentage: z
+    .number()
+    .describe(
+      "Porcentaje impreso en la fila (ej. 20 para 20,00 %; 10,5 para 10,50 %). Leé SOLO el porcentaje, no el importe.",
+    ),
+});
+
+export const discountSupplementSchema = z.object({
+  discount_lines: z
+    .array(discountLineSupplementSchema)
+    .nullable()
+    .describe(
+      "Cada fila de bonificación con su porcentaje. UN elemento por renglón visible (ej. 7 filas → 7 objetos). NO leas ni devuelvas importes en dinero.",
+    ),
+});
+
+export type DiscountSupplement = z.infer<typeof discountSupplementSchema>;
+
+/** Localización del bloque de bonificaciones (coordenadas normalizadas 0-1) para recorte ampliado. */
+export const discountRegionSchema = z.object({
+  found: z
+    .boolean()
+    .describe("true si hay un bloque de filas BONIFICACION/Descuento visible."),
+  x0: z.number().describe("Borde izquierdo del bloque, fracción 0-1 del ancho."),
+  y0: z.number().describe("Borde superior del bloque, fracción 0-1 del alto."),
+  x1: z.number().describe("Borde derecho del bloque (incluye la columna de importes), fracción 0-1."),
+  y1: z.number().describe("Borde inferior del bloque, fracción 0-1 del alto."),
+  row_count: z
+    .number()
+    .nullable()
+    .describe("Cantidad de filas de bonificación visibles en el bloque."),
+});
+
+export type DiscountRegion = z.infer<typeof discountRegionSchema>;

@@ -1,8 +1,12 @@
 import { resolveFechaFacturaForApi } from "@/lib/invoice-calendar-date";
 import { buildCodigoComprobante, parseDocumentKind } from "@/lib/comprobante-code";
-import { matchPerceptionLineToAccount } from "@/lib/tax-line-match";
+import { matchPerceptionLineToAccount, classifyPerceptionTipoImpuesto } from "@/lib/tax-line-match";
 import type { PerceptionChartAccount } from "@/lib/tax-chart-account";
 import type { TaxBreakdownLine } from "@/lib/schemas";
+import {
+  computeGrossBasesByRate,
+  groupVatLinesByRate,
+} from "@/lib/vat-rate";
 import type { SerializedChartAccount } from "@/types/invoice";
 
 export type ContableLine = {
@@ -38,46 +42,69 @@ function decimalToNumber(value: string | null | undefined): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-/** Reparte un monto en N partes iguales en centavos (suma exacta). Fallback sin desglose. */
-function splitAmountInEqualParts(total: number, parts: number): number[] {
-  if (parts <= 0 || total <= 0) return [];
-  const cents = Math.round(total * 100);
-  const base = Math.floor(cents / parts);
-  const remainder = cents % parts;
-  const out: number[] = [];
-  for (let i = 0; i < parts; i++) {
-    out.push((base + (i < remainder ? 1 : 0)) / 100);
-  }
-  return out;
-}
-
-function buildVatContableLines(
+function buildVatAndGravadoContableLines(
+  netAmount: number | null,
   vatAmount: string | null,
   vatLines: TaxBreakdownLine[] | null | undefined,
+  mainCuentaCode: string | null,
   vatCuentaCode: string | null,
 ): ContableLine[] {
   const fromBreakdown = vatLines?.filter((l) => l.amount > 0) ?? [];
+
   if (fromBreakdown.length > 0) {
-    return fromBreakdown.map((l) => ({
-      monto: l.amount,
+    const groups = computeGrossBasesByRate(
+      groupVatLinesByRate(fromBreakdown),
+      netAmount,
+    );
+    const lines: ContableLine[] = [];
+
+    for (const group of groups) {
+      if (
+        netAmount != null &&
+        netAmount > 0 &&
+        group.grossAmount != null &&
+        group.grossAmount > 0
+      ) {
+        lines.push({
+          monto: group.grossAmount,
+          cuenta: mainCuentaCode,
+          centroCosto: null,
+          tipoImpuesto: group.gravCode,
+        });
+      }
+      lines.push({
+        monto: group.vatAmount,
+        cuenta: vatCuentaCode,
+        centroCosto: null,
+        tipoImpuesto: group.ivaCode,
+      });
+    }
+
+    return lines;
+  }
+
+  const lines: ContableLine[] = [];
+  const vat = decimalToNumber(vatAmount);
+
+  if (netAmount != null && netAmount > 0) {
+    lines.push({
+      monto: netAmount,
+      cuenta: mainCuentaCode,
+      centroCosto: null,
+      tipoImpuesto: null,
+    });
+  }
+
+  if (vat != null && vat > 0) {
+    lines.push({
+      monto: vat,
       cuenta: vatCuentaCode,
       centroCosto: null,
       tipoImpuesto: "I21",
-    }));
+    });
   }
 
-  const vat = decimalToNumber(vatAmount);
-  if (vat != null && vat > 0) {
-    return [
-      {
-        monto: vat,
-        cuenta: vatCuentaCode,
-        centroCosto: null,
-        tipoImpuesto: "I21",
-      },
-    ];
-  }
-  return [];
+  return applyGravado21OnNetWhenVatI21(lines);
 }
 
 function buildPerceptionContableLines(
@@ -92,7 +119,7 @@ function buildPerceptionContableLines(
       monto: l.amount,
       cuenta: matchPerceptionLineToAccount(l.label, perceptionsAccounts),
       centroCosto: null,
-      tipoImpuesto: "PERC",
+      tipoImpuesto: classifyPerceptionTipoImpuesto(l.label),
     }));
   }
 
@@ -101,26 +128,19 @@ function buildPerceptionContableLines(
     return [];
   }
 
-  if (perceptionsAccounts.length === 1) {
-    return [
-      {
-        monto: perceptions,
-        cuenta: perceptionsAccounts[0]!.code,
-        centroCosto: null,
-        tipoImpuesto: "PERC",
-      },
-    ];
-  }
-
-  const amounts = splitAmountInEqualParts(perceptions, perceptionsAccounts.length);
-  return perceptionsAccounts
-    .map((acc, i) => ({
-      monto: amounts[i] ?? 0,
-      cuenta: acc.code,
-      centroCosto: null as null,
-      tipoImpuesto: "PERC" as const,
-    }))
-    .filter((l) => l.monto > 0);
+  // Sin desglose: emitimos UNA sola línea con el total (no repartir entre
+  // cuentas, porque una factura puede tener solo PIB o solo PIV, no ambos).
+  // La cuenta y el tipo se deducen de la única cuenta asociada; con varias
+  // cuentas tomamos la primera (el desglose real define PIB/PIV cuando existe).
+  const account = perceptionsAccounts[0]!;
+  return [
+    {
+      monto: perceptions,
+      cuenta: account.code,
+      centroCosto: null,
+      tipoImpuesto: classifyPerceptionTipoImpuesto(account.name),
+    },
+  ];
 }
 
 /** Neto gravado 21% (G21) cuando hay línea de IVA I21 (ApiSigma ImportCompras). */
@@ -135,6 +155,35 @@ function applyGravado21OnNetWhenVatI21(lines: ContableLine[]): ContableLine[] {
   );
 }
 
+function buildBonificacionContableLines(
+  discountAmount: string | null,
+  discountLines: TaxBreakdownLine[] | null | undefined,
+  bonificacionAccountCode: string | null,
+): ContableLine[] {
+  if (!bonificacionAccountCode) return [];
+
+  const fromLines = discountLines?.filter((l) => l.amount > 0) ?? [];
+  const totalFromLines =
+    fromLines.length > 0
+      ? fromLines.reduce((acc, l) => acc + l.amount, 0)
+      : null;
+  const discount =
+    totalFromLines != null && totalFromLines > 0
+      ? totalFromLines
+      : decimalToNumber(discountAmount);
+
+  if (discount == null || discount <= 0) return [];
+
+  return [
+    {
+      monto: Math.round(discount * 100) / 100,
+      cuenta: bonificacionAccountCode,
+      centroCosto: null,
+      tipoImpuesto: "EXE",
+    },
+  ];
+}
+
 function buildContableLines(
   netAmount: string | null,
   vatAmount: string | null,
@@ -142,31 +191,30 @@ function buildContableLines(
   perceptionsAmount: string | null,
   perceptionLines: TaxBreakdownLine[] | null | undefined,
   totalAmount: string | null,
+  discountAmount: string | null,
+  discountLines: TaxBreakdownLine[] | null | undefined,
   mainCuentaCode: string | null,
   vatCuentaCode: string | null,
   perceptionsAccounts: PerceptionChartAccount[],
+  bonificacionAccountCode: string | null,
 ): ContableLine[] {
-  const lines: ContableLine[] = [];
   const net = decimalToNumber(netAmount);
   const total = decimalToNumber(totalAmount);
 
-  if (net != null && net > 0) {
-    lines.push({
-      monto: net,
-      cuenta: mainCuentaCode,
-      centroCosto: null,
-      tipoImpuesto: null,
-    });
-  }
-
-  lines.push(...buildVatContableLines(vatAmount, vatLines, vatCuentaCode));
-  lines.push(
+  const lines: ContableLine[] = [
+    ...buildVatAndGravadoContableLines(
+      net,
+      vatAmount,
+      vatLines,
+      mainCuentaCode,
+      vatCuentaCode,
+    ),
     ...buildPerceptionContableLines(
       perceptionsAmount,
       perceptionLines,
       perceptionsAccounts,
     ),
-  );
+  ];
 
   if (lines.length === 0 && total != null && total > 0) {
     lines.push({
@@ -177,7 +225,15 @@ function buildContableLines(
     });
   }
 
-  return applyGravado21OnNetWhenVatI21(lines);
+  lines.push(
+    ...buildBonificacionContableLines(
+      discountAmount,
+      discountLines,
+      bonificacionAccountCode,
+    ),
+  );
+
+  return lines;
 }
 
 export type InvoiceJsonSource = {
@@ -194,10 +250,13 @@ export type InvoiceJsonSource = {
   vatLines?: TaxBreakdownLine[] | null;
   perceptionsAmount: string | null;
   perceptionLines?: TaxBreakdownLine[] | null;
+  discountAmount?: string | null;
+  discountLines?: TaxBreakdownLine[] | null;
   totalAmount: string | null;
   chartAccount: SerializedChartAccount | null;
   vatChartAccountCode?: string | null;
   perceptionsAccounts?: PerceptionChartAccount[];
+  bonificacionAccountCode?: string | null;
 };
 
 export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
@@ -214,9 +273,12 @@ export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
       invoice.perceptionsAmount,
       invoice.perceptionLines,
       invoice.totalAmount,
+      invoice.discountAmount ?? null,
+      invoice.discountLines,
       mainCuentaCode,
       invoice.vatChartAccountCode ?? null,
       invoice.perceptionsAccounts ?? [],
+      invoice.bonificacionAccountCode ?? null,
     ),
     sucursal: invoice.sucursal,
     mercaderias: [],

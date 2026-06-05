@@ -7,8 +7,12 @@ import {
   invoiceExtractionSchema,
   fiscalAuthSupplementSchema,
   amountsSupplementSchema,
+  discountSupplementSchema,
+  discountRegionSchema,
   type InvoiceExtraction,
   type AmountsSupplement,
+  type DiscountSupplement,
+  type DiscountRegion,
 } from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
@@ -42,8 +46,10 @@ const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
 - Desglose fiscal (pie de factura / tabla de impuestos / totales): leé cada renglón por separado.
 - vat_lines: cada fila de IVA con label (ej. "IVA 21%", "IVA 10,5%") y amount. Si hay un solo importe de IVA, un solo elemento. null si no hay IVA.
 - vat_amount: suma de los amount de vat_lines, o el único importe de IVA si no hay desglose.
-- perception_lines: cada percepción impositiva con label (ej. "Percepción IIBB", "Per. IVA") y amount. null si no hay percepciones.
+- perception_lines: cada percepción impositiva CON IMPORTE MAYOR A 0, con label que indique el tipo y amount. Distinguí percepción de IIBB/ingresos brutos (ej. "Perc. IIBB Bs.As.", "Percepción IIBB CABA") de percepción de IVA (ej. "Perc. IVA", "Percepción IVA"). IMPORTANTE: a veces hay una grilla titulada "PERCEPCIONES IIBB" con varias jurisdicciones (C.A.B.A., Bs.As., Tucumán, etc.) en 0,00 y, dentro o debajo de esa misma grilla, un renglón "Perc. IVA" con importe; en ese caso devolvé SOLO los renglones con importe > 0 y conservá su tipo real ("Perc. IVA" es percepción de IVA aunque esté bajo el título IIBB). NO incluyas renglones en 0,00. null si no hay ninguna percepción con importe.
 - perceptions_amount: suma de los amount de perception_lines, o el total de percepciones si no hay desglose.
+- discount_lines: ARRAY con UN elemento por cada bonificación/descuento con importe > 0 (ej. "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" repetida varias veces, "Descuento", "Desc 1/2/3"). CRÍTICO: si hay 7 filas BONIFICACION visibles, devolvé 7 objetos (no solo la primera). En facturas Jeluz suelen estar en una COLUMNA LATERAL derecha del detalle de ítems, con % e importe negativo; leé TODAS aunque NO estén en el pie de totales. Devolvé amount en POSITIVO (magnitud) aunque en la factura figure negativo. NO incluyas renglones en 0,00. null si no hay bonificaciones.
+- discount_amount: suma EXACTA de todos los amount de discount_lines (ej. 7 bonificaciones → sumá las 7). NO uses solo la primera fila. NO sumes bonificaciones en net_amount ni en el cuadre net+IVA+percepciones≈total (el subtotal/neto gravado ya viene después de aplicar bonificaciones).
 Para el resto de campos: si un dato no está en el texto o no es legible en la imagen, devolvé null. Para "cuit", solo null si en la cabecera del emisor no hay ningún CUIT legible. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
 
 const SYSTEM_PROMPT_TEXT = `Sos un asistente contable para Argentina. A partir del texto OCR de una factura de proveedor, extraé campos estructurados.
@@ -128,7 +134,7 @@ export async function extractInvoiceDataFromImage(
           content: [
             {
               type: "text",
-              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991). Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.",
+              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991). Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total. Si hay columna de BONIFICACION GENERAL/ESPECIAL/ADICIONAL junto al detalle de ítems, devolvé discount_lines con UN elemento por cada fila visible y discount_amount = suma de todas (montos en positivo).",
             },
             {
               type: "image_url",
@@ -234,7 +240,7 @@ export async function extractInvoiceDataFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN. Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.`,
+      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN. Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total. Si hay columna de BONIFICACION GENERAL/ESPECIAL/ADICIONAL, devolvé discount_lines con UN elemento por cada fila y discount_amount = suma total (montos en positivo).`,
     },
     ...images.map((img) => ({
       type: "image_url" as const,
@@ -318,6 +324,106 @@ export async function supplementAmountsFromImages(
       response_format: zodResponseFormat(
         amountsSupplementSchema,
         "amounts_supplement",
+      ),
+    }),
+  );
+
+  return completion.choices[0]?.message?.parsed ?? null;
+}
+
+const DISCOUNT_REGION_VISION_PROMPT = `Sos un asistente que localiza regiones en una factura. Tu ÚNICA tarea es ubicar el BLOQUE de filas de bonificaciones/descuentos.
+
+Buscá las filas que dicen "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL", "Descuento" (suelen tener un % y un importe negativo). En facturas Jeluz están en el centro-derecha, debajo del detalle de ítems y arriba del recuadro Subtotal.
+
+Devolvé una caja (coordenadas NORMALIZADAS 0-1, origen arriba-izquierda) que CONTENGA TODAS las filas de bonificación, INCLUYENDO la columna de importes a la derecha:
+- x0,y0 = esquina superior izquierda (incluí desde la palabra "BONIFICACION").
+- x1,y1 = esquina inferior derecha (incluí el final del importe más a la derecha).
+Dejá un pequeño margen. Si no hay bonificaciones, found=false.`;
+
+/** Primer paso: localiza el bloque de bonificaciones para recortarlo ajustado. */
+export async function locateDiscountRegion(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+): Promise<DiscountRegion | null> {
+  if (images.length === 0) return null;
+
+  const openai = getOpenAI();
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: "Ubicá el bloque de filas BONIFICACION/Descuento y devolvé su caja normalizada (incluí la columna de importes a la derecha).",
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
+      messages: [
+        { role: "system", content: DISCOUNT_REGION_VISION_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(discountRegionSchema, "discount_region"),
+    }),
+  );
+
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed?.found) return null;
+  return parsed;
+}
+
+const DISCOUNT_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. Tu ÚNICA tarea es leer las filas de bonificaciones/descuentos y devolver el PORCENTAJE de cada una.
+
+Las filas suelen decir "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" (puede repetirse) con un porcentaje (ej. 20,00 %, 16,00 %).
+
+La imagen es un recorte AMPLIADO del bloque de bonificaciones (escala de grises).
+
+Reglas CRÍTICAS:
+- discount_lines: UN objeto por cada fila visible. Si hay 7 filas, devolvé 7 objetos.
+- percentage: SOLO el número del porcentaje (20 para 20,00 %; 10,5 para 10,50 %). NO devuelvas importes en pesos.
+- Leé el porcentaje con cuidado (20 vs 19, 16 vs 15, 10 vs 19).
+- NO incluyas filas sin porcentaje legible. Si no hay bonificaciones, discount_lines null.`;
+
+/**
+ * Segunda pasada de visión enfocada en la columna de bonificaciones cuando la extracción principal no las lista todas.
+ */
+export async function supplementDiscountFromImages(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+): Promise<DiscountSupplement | null> {
+  if (images.length === 0) return null;
+
+  const openai = getOpenAI();
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: "Leé TODAS las filas BONIFICACION visibles. Devolvé label y percentage de cada una (NO importes en pesos). Si hay 7 filas, devolvé 7 objetos.",
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
+      messages: [
+        { role: "system", content: DISCOUNT_SUPPLEMENT_VISION_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(
+        discountSupplementSchema,
+        "discount_supplement",
       ),
     }),
   );

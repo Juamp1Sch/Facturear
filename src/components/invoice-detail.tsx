@@ -14,7 +14,7 @@ import {
 import { buildInvoiceJson } from "@/lib/invoice-json";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
 import { formatMoney } from "@/lib/format-money";
-import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 
@@ -82,6 +82,10 @@ export function InvoiceDetail({
   );
 
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+  const discountBreakdown = parseDiscountFromPayload(
+    invoice.aiPayload,
+    invoice.rawOcrText,
+  );
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
 
   const contableJson = buildInvoiceJson({
@@ -98,10 +102,16 @@ export function InvoiceDetail({
     vatLines: taxBreakdown.vatLines,
     perceptionsAmount: invoice.perceptionsAmount,
     perceptionLines: taxBreakdown.perceptionLines,
+    discountAmount:
+      discountBreakdown.discountAmount != null
+        ? String(discountBreakdown.discountAmount)
+        : null,
+    discountLines: discountBreakdown.discountLines,
     totalAmount: invoice.totalAmount,
     chartAccount: invoice.chartAccount,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
     perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
   });
 
   const uploadDisabledReason =

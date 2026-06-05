@@ -171,6 +171,7 @@ model ChartAccount {
   invoices      Invoice[]
   supplierLinks SupplierChartAccountLink[]
   vatTaxSettings                TaxChartAccountSettings[]           @relation("VatChartAccount")
+  bonificacionTaxSettings       TaxChartAccountSettings[]           @relation("BonificacionChartAccount")
   taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
   createdAt     DateTime                   @default(now()) @map("created_at")
   updatedAt     DateTime                   @updatedAt @map("updated_at")
@@ -185,6 +186,8 @@ model TaxChartAccountSettings {
   user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   vatChartAccountId String?       @map("vat_chart_account_id")
   vatChartAccount   ChartAccount? @relation("VatChartAccount", fields: [vatChartAccountId], references: [id], onDelete: SetNull)
+  bonificacionChartAccountId String?       @map("bonificacion_chart_account_id")
+  bonificacionChartAccount   ChartAccount? @relation("BonificacionChartAccount", fields: [bonificacionChartAccountId], references: [id], onDelete: SetNull)
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 

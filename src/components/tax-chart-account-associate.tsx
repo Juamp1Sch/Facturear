@@ -30,6 +30,9 @@ function formatAccountLabel(a: {
 export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormData }) {
   const router = useRouter();
   const [vatChartAccountId, setVatChartAccountId] = useState(data.vatChartAccountId ?? "");
+  const [bonificacionChartAccountId, setBonificacionChartAccountId] = useState(
+    data.bonificacionChartAccountId ?? "",
+  );
   const [perceptionIds, setPerceptionIds] = useState<Set<string>>(
     () => new Set(data.perceptionChartAccountIds),
   );
@@ -40,8 +43,13 @@ export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormDat
 
   useEffect(() => {
     setVatChartAccountId(data.vatChartAccountId ?? "");
+    setBonificacionChartAccountId(data.bonificacionChartAccountId ?? "");
     setPerceptionIds(new Set(data.perceptionChartAccountIds));
-  }, [data.vatChartAccountId, data.perceptionChartAccountIds]);
+  }, [
+    data.vatChartAccountId,
+    data.bonificacionChartAccountId,
+    data.perceptionChartAccountIds,
+  ]);
 
   const accountsById = useMemo(() => {
     const m = new Map<string, (typeof data.accounts)[number]>();
@@ -91,6 +99,7 @@ export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormDat
               setPending(true);
               const formData = new FormData();
               formData.set("vatChartAccountId", vatChartAccountId);
+              formData.set("bonificacionChartAccountId", bonificacionChartAccountId);
               for (const id of orderedPerceptionIds) {
                 formData.append("perceptionsChartAccountIds", id);
               }
@@ -166,7 +175,7 @@ export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormDat
               )}
 
               {accountsForPerceptionAdder.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-2 pb-8">
                   <label className="text-sm font-medium" htmlFor="perceptionAccountAdd">
                     Agregar cuenta
                   </label>
@@ -193,6 +202,23 @@ export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormDat
                   otra.
                 </p>
               ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="bonificacionChartAccountId" className="text-sm font-medium">
+                Cuenta bonificación
+              </label>
+              <ChartAccountPicker
+                inputId="bonificacionChartAccountId"
+                accounts={data.accounts}
+                value={bonificacionChartAccountId}
+                onChange={setBonificacionChartAccountId}
+                disabled={pending}
+              />
+              <p className="text-xs text-muted-foreground">
+                Se aplica a bonificaciones o descuentos del comprobante (tipoImpuesto EXE en el
+                JSON contable).
+              </p>
             </div>
 
             {error ? (

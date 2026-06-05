@@ -1,5 +1,16 @@
-import { supplementAmountsFromImages } from "@/lib/ai";
-import { cropTotalsRegions, type VisionImage } from "@/lib/image-preprocess";
+import {
+  locateDiscountRegion,
+  supplementAmountsFromImages,
+  supplementDiscountFromImages,
+} from "@/lib/ai";
+import {
+  cropDiscountHeuristicRegions,
+  cropDiscountRegions,
+  cropNormalizedBox,
+  cropTotalsRegions,
+  pickFooterVisionImages,
+  type VisionImage,
+} from "@/lib/image-preprocess";
 import {
   pickBestReconcilingFields,
   reconcileAmounts,
@@ -8,7 +19,7 @@ import {
   vatConsistentWithNet,
   type AmountFields,
 } from "@/lib/amount-reconcile";
-import type { AmountsSupplement, InvoiceExtraction } from "@/lib/schemas";
+import type { AmountsSupplement, DiscountSupplement, InvoiceExtraction } from "@/lib/schemas";
 import { sumTaxLines } from "@/lib/tax-breakdown";
 
 export type FinalizedAmounts = {
@@ -49,6 +60,33 @@ function resolveSupplementFields(supplement: AmountsSupplement): AmountFields {
   };
 }
 
+/**
+ * Reconcilia las líneas de percepción con el total corregido, preservando las
+ * etiquetas (IIBB / IVA) que definen el tipoImpuesto contable (PIB / PIV).
+ * - 0 líneas → null.
+ * - 1 línea → conserva el label y reajusta el monto al total corregido.
+ * - >1 líneas → si la suma sigue coincidiendo, las mantiene; si no, no puede
+ *   redistribuir sin perder precisión y devuelve null.
+ */
+function reconcilePerceptionLines(
+  lines: InvoiceExtraction["perception_lines"],
+  correctedPerceptions: number | null,
+): InvoiceExtraction["perception_lines"] {
+  const positive = lines?.filter((l) => l.amount > 0) ?? [];
+  if (positive.length === 0) return null;
+  if (correctedPerceptions == null || correctedPerceptions <= 0) return null;
+
+  if (positive.length === 1) {
+    return [{ ...positive[0]!, amount: correctedPerceptions }];
+  }
+
+  const sum = roundMoney(positive.reduce((acc, l) => acc + l.amount, 0));
+  if (Math.abs(sum - roundMoney(correctedPerceptions)) <= 0.01) {
+    return positive;
+  }
+  return null;
+}
+
 function applyAmountFieldsToExtraction(
   extracted: InvoiceExtraction,
   fields: AmountFields,
@@ -60,8 +98,9 @@ function applyAmountFieldsToExtraction(
     vat_amount: fields.vat,
     perceptions_amount: fields.perceptions,
     total_amount: fields.total,
-    perception_lines:
-      options?.clearPerceptionLines ? null : extracted.perception_lines,
+    perception_lines: options?.clearPerceptionLines
+      ? reconcilePerceptionLines(extracted.perception_lines, fields.perceptions)
+      : extracted.perception_lines,
   };
 }
 
@@ -189,6 +228,43 @@ export async function fetchAmountsSupplementCropped(
   if (visionImages.length === 0) return null;
   const croppedImages = await cropTotalsRegions(visionImages);
   return supplementAmountsFromImages(croppedImages);
+}
+
+/**
+ * Recorte heurístico del bloque BONIFICACION → lee solo porcentajes → importes se calculan
+ * con el neto gravado y descuentos secuenciales (más preciso que OCR de 7 dígitos).
+ */
+export async function fetchDiscountSupplementCropped(
+  visionImages: VisionImage[],
+): Promise<DiscountSupplement | null> {
+  if (visionImages.length === 0) return null;
+
+  const target = pickFooterVisionImages(visionImages)[0];
+
+  const heuristicCrops = await cropDiscountHeuristicRegions(visionImages);
+  if (heuristicCrops.length > 0) {
+    const fromHeuristic = await supplementDiscountFromImages(heuristicCrops);
+    if (fromHeuristic?.discount_lines?.length) return fromHeuristic;
+  }
+
+  if (target) {
+    const region = await locateDiscountRegion([target]);
+    if (region?.found) {
+      const tightCrop = await cropNormalizedBox(target.buffer, {
+        x0: region.x0,
+        y0: region.y0,
+        x1: region.x1,
+        y1: region.y1,
+      });
+      if (tightCrop) {
+        const fromTight = await supplementDiscountFromImages([tightCrop]);
+        if (fromTight?.discount_lines?.length) return fromTight;
+      }
+    }
+  }
+
+  const discountCrops = await cropDiscountRegions(visionImages);
+  return supplementDiscountFromImages(discountCrops);
 }
 
 export type FinalizeExtractedAmountsOptions = {

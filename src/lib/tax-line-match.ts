@@ -9,6 +9,7 @@ function normalizeForMatch(value: string): string {
     .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\bi\s+v\s+a\b/g, "iva")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -25,6 +26,17 @@ function hasIibb(text: string): boolean {
 function hasIvaPerception(text: string): boolean {
   const n = normalizeForMatch(text);
   return n.includes("iva") && (n.includes("percepcion") || n.includes("perc"));
+}
+
+/** Clasifica el tipoImpuesto contable de una percepción: PIB (IIBB) o PIV (IVA). */
+export function classifyPerceptionTipoImpuesto(text: string | null): "PIB" | "PIV" {
+  const normalized = normalizeForMatch(text ?? "");
+  // Priorizar IVA aunque el label incluya "IIBB" de un encabezado de sección
+  // (ej. bloque "PERCEPCIONES IIBB" con renglón "Perc. IVA").
+  if (hasIvaPerception(normalized)) {
+    return "PIV";
+  }
+  return "PIB";
 }
 
 /** Elige la cuenta de percepciones asociada que mejor coincide con el texto del renglón. */

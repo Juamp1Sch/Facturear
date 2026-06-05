@@ -11,11 +11,17 @@ export type TaxAssociationFormData = {
   accounts: { id: string; code: string; name: string; type: string | null }[];
   vatChartAccountId: string | null;
   perceptionChartAccountIds: string[];
+  bonificacionChartAccountId: string | null;
 };
 
 export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFormData> {
   if (!isDatabaseConfigured()) {
-    return { accounts: [], vatChartAccountId: null, perceptionChartAccountIds: [] };
+    return {
+      accounts: [],
+      vatChartAccountId: null,
+      perceptionChartAccountIds: [],
+      bonificacionChartAccountId: null,
+    };
   }
 
   const session = await auth();
@@ -32,7 +38,10 @@ export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFo
     }),
     prisma.taxChartAccountSettings.findUnique({
       where: { userId },
-      select: { vatChartAccountId: true },
+      select: {
+        vatChartAccountId: true,
+        bonificacionChartAccountId: true,
+      },
     }),
     prisma.taxChartAccountPerceptionLink.findMany({
       where: { userId },
@@ -45,6 +54,7 @@ export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFo
     accounts,
     vatChartAccountId: settings?.vatChartAccountId ?? null,
     perceptionChartAccountIds: perceptionLinks.map((l) => l.chartAccountId),
+    bonificacionChartAccountId: settings?.bonificacionChartAccountId ?? null,
   };
 }
 
@@ -64,6 +74,9 @@ export async function saveTaxChartAccountSettings(
   const userId = session.user.id;
 
   const vatChartAccountId = String(formData.get("vatChartAccountId") ?? "").trim();
+  const bonificacionChartAccountId = String(
+    formData.get("bonificacionChartAccountId") ?? "",
+  ).trim();
 
   const perceptionIdsRaw = formData
     .getAll("perceptionsChartAccountIds")
@@ -81,6 +94,16 @@ export async function saveTaxChartAccountSettings(
     }
   }
 
+  if (bonificacionChartAccountId) {
+    const bonificacionAccount = await prisma.chartAccount.findFirst({
+      where: { id: bonificacionChartAccountId, userId, active: true },
+      select: { id: true },
+    });
+    if (!bonificacionAccount) {
+      return { ok: false, error: "La cuenta de bonificación no es válida." };
+    }
+  }
+
   if (perceptionIds.length > 0) {
     const found = await prisma.chartAccount.findMany({
       where: { userId, active: true, id: { in: perceptionIds } },
@@ -92,6 +115,7 @@ export async function saveTaxChartAccountSettings(
   }
 
   const vatId = vatChartAccountId || null;
+  const bonificacionId = bonificacionChartAccountId || null;
 
   await prisma.$transaction(async (tx) => {
     await tx.taxChartAccountPerceptionLink.deleteMany({ where: { userId } });
@@ -101,7 +125,7 @@ export async function saveTaxChartAccountSettings(
       });
     }
 
-    if (!vatId && perceptionIds.length === 0) {
+    if (!vatId && perceptionIds.length === 0 && !bonificacionId) {
       await tx.taxChartAccountSettings.deleteMany({ where: { userId } });
     } else {
       await tx.taxChartAccountSettings.upsert({
@@ -109,9 +133,11 @@ export async function saveTaxChartAccountSettings(
         create: {
           userId,
           vatChartAccountId: vatId,
+          bonificacionChartAccountId: bonificacionId,
         },
         update: {
           vatChartAccountId: vatId,
+          bonificacionChartAccountId: bonificacionId,
         },
       });
     }

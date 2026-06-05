@@ -11,7 +11,7 @@ import {
   todayCalendarDateArgentina,
 } from "@/lib/invoice-calendar-date";
 import { buildInvoiceJson } from "@/lib/invoice-json";
-import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import { resolveTaxChartAccountsForUser } from "@/lib/tax-chart-account";
 import { buildIntegrationAuthHeaders } from "@/lib/integration-auth";
 
@@ -67,6 +67,10 @@ export async function uploadInvoiceToDestination(
 
   const taxChartAccounts = await resolveTaxChartAccountsForUser(userId);
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+  const discountBreakdown = parseDiscountFromPayload(
+    invoice.aiPayload,
+    invoice.rawOcrText,
+  );
 
   const payload = buildInvoiceJson({
     movementId: invoice.movementId,
@@ -82,6 +86,11 @@ export async function uploadInvoiceToDestination(
     vatLines: taxBreakdown.vatLines,
     perceptionsAmount: invoice.perceptionsAmount?.toString() ?? null,
     perceptionLines: taxBreakdown.perceptionLines,
+    discountAmount:
+      discountBreakdown.discountAmount != null
+        ? String(discountBreakdown.discountAmount)
+        : null,
+    discountLines: discountBreakdown.discountLines,
     totalAmount: invoice.totalAmount?.toString() ?? null,
     chartAccount: invoice.chartAccount
       ? {
@@ -93,6 +102,7 @@ export async function uploadInvoiceToDestination(
       : null,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
     perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
   });
 
   if (!payload.fechaFactura) {
