@@ -3,7 +3,13 @@ import { zodResponseFormat } from "openai/helpers/zod";
 
 import { acceptFiscalAuthSupplement } from "@/lib/document-class";
 import { withOpenAIRetry } from "@/lib/openai-retry";
-import { invoiceExtractionSchema, fiscalAuthSupplementSchema, type InvoiceExtraction } from "@/lib/schemas";
+import {
+  invoiceExtractionSchema,
+  fiscalAuthSupplementSchema,
+  amountsSupplementSchema,
+  type InvoiceExtraction,
+  type AmountsSupplement,
+} from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
   /** Proveedores del maestro con CUIT; solo si hay datos, se añade al system prompt. */
@@ -12,7 +18,13 @@ export type InvoiceExtractOptions = {
   chartAccountHintsBlock?: string | null;
 };
 
-const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay varios totales, elegí el total final a pagar.
+const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
+  • Formato argentino impreso: miles con PUNTO, decimales con COMA (ej. "1.227,55" = 1227.55; "61,38" = 61.38). Ignorá el prefijo "USD", "$" o "ARS" y devolvé el número decimal interno (1227.55).
+  • Leé el RECUADRO DE TOTALES del pie de factura (típicamente abajo a la derecha): Subtotal/Neto, Total IVA, Total Percep./Percepciones, Total.
+  • ANTES de responder, verificá que net_amount + vat_amount + perceptions_amount ≈ total_amount (tolerancia centavos). Si NO cierra, RELEÉ dígito por dígito cada importe del recuadro de totales; no inventes ni redondees de más.
+  • Si hay caja "Saldo en cuenta" o desglose lateral (abajo a la izquierda) con "Perc IIBB", usala para validar el Total Percep. IIBB del recuadro derecho; si difieren, releé ambos.
+  • Dígitos similares: prestá atención a 1/7, 2/3, 4/6, 5/8, 0/8. Si un dígito es ambiguo, preferí el valor que hace cerrar la suma con el Total impreso.
+  • Si hay varios totales, elegí el total final a pagar del recuadro principal de totales.
 - CUIT del EMISOR (campo "cuit"): SOLO el de la CABECERA / membrete / bloque fiscal del PROVEEDOR (arriba del documento, junto al nombre del emisor). Contá exactamente 11 dígitos y devolvé XX-XXXXXXXX-X. NUNCA uses el CUIT del cliente, destinatario, alumno ni el del cuerpo bajo "Consumidor final". Si hay dos CUITs, siempre el del encabezado del emisor. Si en cabecera se leen 11 dígitos claros (aunque haya otro CUIT abajo), devolvé esos 11 dígitos formateados: NO uses null solo por dudar del dígito verificador AFIP ni por existencia de otro CUIT en el cuerpo.
 - invoice_number: si el encabezado AFIP muestra "Punto de Venta" / "Punto de Vta" y "Número" / "Comp. Nro" (típicamente arriba a la derecha, junto a FACTURA A/B/C), combiná ambos en NNNNN-NNNNNNNN (5 dígitos PV + guion + 8 dígitos número, con ceros a la izquierda; ej. PV 00004 y Nro 00059991 → 00004-00059991). No confundir con CAE, OC, códigos de ítem ni número de cliente. Si solo hay un número sin punto de venta, devolvé ese valor sin inventar PV.
 - Fecha: ISO YYYY-MM-DD.
@@ -57,6 +69,12 @@ function getOpenAI() {
   return new OpenAI({ apiKey });
 }
 
+function getOpenAIModel(): string {
+  return process.env.OPENAI_MODEL ?? "gpt-4o";
+}
+
+const EXTRACTION_TEMPERATURE = 0;
+
 export async function extractInvoiceData(
   rawOcrText: string,
   options: InvoiceExtractOptions = {},
@@ -67,7 +85,8 @@ export async function extractInvoiceData(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
       messages: [
         { role: "system", content: systemContent },
         {
@@ -100,7 +119,8 @@ export async function extractInvoiceDataFromImage(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
       messages: [
         { role: "system", content: systemContent },
         {
@@ -108,7 +128,7 @@ export async function extractInvoiceDataFromImage(
           content: [
             {
               type: "text",
-              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991).",
+              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991). Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.",
             },
             {
               type: "image_url",
@@ -168,7 +188,8 @@ export async function supplementFiscalAuthFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
       messages: [
         { role: "system", content: FISCAL_AUTH_VISION_PROMPT },
         { role: "user", content: userContent },
@@ -213,7 +234,7 @@ export async function extractInvoiceDataFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN.`,
+      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN. Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.`,
     },
     ...images.map((img) => ({
       type: "image_url" as const,
@@ -226,7 +247,8 @@ export async function extractInvoiceDataFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
       messages: [
         { role: "system", content: systemContent },
         { role: "user", content: userContent },
@@ -243,4 +265,62 @@ export async function extractInvoiceDataFromImages(
     throw new Error("OpenAI no devolvió datos parseables.");
   }
   return parsed;
+}
+
+const AMOUNTS_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. La imagen es un RECORTE AMPLIADO de la franja inferior del comprobante (recuadro de totales a la derecha y, si aparece, caja "Saldo en cuenta" / desglose a la izquierda).
+
+Buscá y devolvé SOLO estos importes:
+- net_amount: "Subtotal", "Neto gravado", "Importe neto" (recuadro derecho, sin IVA ni percepciones).
+- vat_amount: "Total IVA", "IVA 21%", suma de IVA.
+- perceptions_amount: "Total Percep. IIBB" / "Percepciones IIBB" del RECUADRO DERECHO de totales.
+- perceptions_amount_secondary: "Perc IIBB" / percepción IIBB en la caja "Saldo en cuenta" o desglose INFERIOR IZQUIERDO (si está visible). Debe coincidir con perceptions_amount; si leés valores distintos, devolvé ambos.
+- total_amount: "Total" final a pagar (fila más abajo del recuadro derecho). Releé dígito por dígito (6 vs 4: 1.546,72 vs 1.544,72).
+
+Reglas CRÍTICAS:
+- Formato argentino: miles con punto, decimales con coma (1.227,55 → 1227.55). Ignorá "USD" o "$".
+- Leé dígito por dígito. Cuidado con 4/6 (61,38 vs 59,38 o 41,38) y en el Total (1.546,72 vs 1.544,72).
+- CRUZÁ perceptions_amount (derecha) con perceptions_amount_secondary (izquierda): si difieren, releé ambos antes de responder.
+- ANTES de responder, verificá net_amount + vat_amount + perceptions_amount ≈ total_amount. Si no cierra, releé cada dígito del Total y de Percepciones.
+- vat_lines y perception_lines: solo si hay desglose visible.
+- Si un importe no es legible, null (no inventes).`;
+
+/**
+ * Segunda pasada de visión enfocada en el recuadro de totales cuando la suma no cierra.
+ */
+export async function supplementAmountsFromImages(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+): Promise<AmountsSupplement | null> {
+  if (images.length === 0) return null;
+
+  const openai = getOpenAI();
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: "Esta imagen es un recorte ampliado del pie de la factura. Leé Subtotal, Total IVA, Total Percep. IIBB (derecha), Perc IIBB en Saldo en cuenta (izquierda, si aparece) y Total final. Cruzá ambas percepciones; deben coincidir. Releé Total y Percepciones dígito por dígito (6 vs 4).",
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
+      messages: [
+        { role: "system", content: AMOUNTS_SUPPLEMENT_VISION_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(
+        amountsSupplementSchema,
+        "amounts_supplement",
+      ),
+    }),
+  );
+
+  return completion.choices[0]?.message?.parsed ?? null;
 }

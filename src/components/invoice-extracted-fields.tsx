@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
+import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
 import type { DocumentKind } from "@/lib/comprobante-code";
 import {
   DOCUMENT_KIND_OPTIONS,
@@ -186,6 +187,7 @@ export function InvoiceExtractedFields({
 
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
+  const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
 
   return (
     <Card>
@@ -214,6 +216,17 @@ export function InvoiceExtractedFields({
         {error ? (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
+          </div>
+        ) : null}
+
+        {amountsReview.needsReview ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            Revisar importes: la suma neto + IVA + percepciones no coincide con el
+            total
+            {amountsReview.discrepancy != null
+              ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
+              : ""}
+            . Corregí los valores en Editar.
           </div>
         ) : null}
 

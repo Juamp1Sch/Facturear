@@ -7,7 +7,7 @@ export async function rasterizePdfFirstPagePng(
   buffer: Buffer,
   options?: { scale?: number },
 ): Promise<Buffer> {
-  const doc = await pdf(buffer, { scale: options?.scale ?? 2 });
+  const doc = await pdf(buffer, { scale: options?.scale ?? 3 });
   if (doc.length < 1) {
     throw new Error("El PDF no tiene páginas.");
   }
