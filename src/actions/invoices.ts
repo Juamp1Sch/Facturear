@@ -12,6 +12,15 @@ import {
   extractInvoiceDataFromImage,
   extractInvoiceDataFromImages,
 } from "@/lib/ai";
+import {
+  fetchAmountsSupplementCropped,
+  finalizeExtractedAmounts,
+} from "@/lib/extraction-amounts";
+import {
+  pickFooterVisionImages,
+  preprocessVisionImages,
+} from "@/lib/image-preprocess";
+import type { AmountsSupplement } from "@/lib/schemas";
 import { enrichExtractionFiscalAuth } from "@/lib/enrich-extraction-fiscal-auth";
 import {
   serializeInvoiceForBatch,
@@ -45,7 +54,6 @@ import { resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
-import { sumTaxLines } from "@/lib/tax-breakdown";
 import { parseDocumentKind } from "@/lib/comprobante-code";
 import {
   parseFiscalDocumentClass,
@@ -179,7 +187,12 @@ async function extractFromParts(
     maestroCuitHintsBlock: string | null;
     chartAccountHintsBlock: string | null;
   },
-): Promise<{ extracted: InvoiceExtraction; rawOcrText: string | null }> {
+): Promise<{
+  extracted: InvoiceExtraction;
+  rawOcrText: string | null;
+  visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[];
+  amountsSupplement?: AmountsSupplement | null;
+}> {
   const pdfTexts: { partNum: number; text: string; weak: boolean }[] = [];
   const allPdf = parts.every((p) => p.mimeType === "application/pdf");
 
@@ -226,16 +239,26 @@ async function extractFromParts(
     }
   }
 
-  const extracted = await extractInvoiceDataFromImages(visionImages, extractOpts);
+  const preprocessedImages = await preprocessVisionImages(visionImages);
+  const extracted = await extractInvoiceDataFromImages(preprocessedImages, extractOpts);
   const rawOcrText =
     ocrNotes.length > 0
       ? `${ocrNotes.join("\n\n")}\n\n[Campos inferidos por visión en ${parts.length} parte(s).]`
       : `[${parts.length} parte(s): campos inferidos por visión.]`;
-  const enriched = await enrichExtractionFiscalAuth(extracted, {
+  const footerImages = pickFooterVisionImages(preprocessedImages);
+  const [enriched, amountsSupplement] = await Promise.all([
+    enrichExtractionFiscalAuth(extracted, {
+      rawOcrText,
+      visionImages: footerImages,
+    }),
+    fetchAmountsSupplementCropped(preprocessedImages),
+  ]);
+  return {
+    extracted: enriched,
     rawOcrText,
-    visionImages,
-  });
-  return { extracted: enriched, rawOcrText };
+    visionImages: preprocessedImages,
+    amountsSupplement,
+  };
 }
 
 async function applyExtractionToInvoice(
@@ -243,6 +266,8 @@ async function applyExtractionToInvoice(
   userId: string,
   extracted: InvoiceExtraction,
   rawOcrText: string | null,
+  visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+  amountsSupplement?: AmountsSupplement | null,
 ): Promise<void> {
   const prior = await prisma.invoice.findFirst({
     where: { id: invoiceId },
@@ -280,15 +305,24 @@ async function applyExtractionToInvoice(
   const fiscalAuthType = doc.fiscalAuthType;
   const fiscalAuthCode = doc.fiscalAuthCode;
 
-  const vatFromLines = sumTaxLines(extracted.vat_lines);
-  const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
-  const vatAmount = vatFromLines ?? extracted.vat_amount;
-  const perceptionsAmount =
-    perceptionsFromLines ?? extracted.perceptions_amount;
+  const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
+    precomputedSupplement: amountsSupplement,
+  });
+  const resolvedExtracted = finalized.extracted;
 
   const aiPayloadOut: Record<string, unknown> = {
-    ...(extracted as Record<string, unknown>),
+    ...(resolvedExtracted as Record<string, unknown>),
   };
+  aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
+  if (finalized.amountsDiscrepancy != null) {
+    aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
+  }
+  if (finalized.amountsAlgebraicallyDerived) {
+    aiPayloadOut.amounts_algebraically_derived = true;
+  }
+  if (finalized.correctedField) {
+    aiPayloadOut.amounts_corrected_field = finalized.correctedField;
+  }
   if (supplierCode) aiPayloadOut.supplier_code = supplierCode;
   if (resolved?.cuit) aiPayloadOut.cuit = providerCuit;
   aiPayloadOut.document_class = documentClass;
@@ -304,7 +338,7 @@ async function applyExtractionToInvoice(
     where: { id: invoiceId },
     data: {
       rawOcrText,
-      providerName: extracted.provider,
+      providerName: resolvedExtracted.provider,
       providerCuit,
       supplierCode,
       empresa: empresaOut,
@@ -315,24 +349,25 @@ async function applyExtractionToInvoice(
       afipCode,
       fiscalAuthType,
       fiscalAuthCode,
-      invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(extracted.invoice_number),
-      invoiceType: extracted.invoice_type,
+      invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(resolvedExtracted.invoice_number),
+      invoiceType: resolvedExtracted.invoice_type,
       invoiceDate,
       netAmount:
-        extracted.net_amount != null
-          ? new Prisma.Decimal(extracted.net_amount)
+        finalized.netAmount != null
+          ? new Prisma.Decimal(finalized.netAmount)
           : null,
-      vatAmount: vatAmount != null ? new Prisma.Decimal(vatAmount) : null,
+      vatAmount:
+        finalized.vatAmount != null ? new Prisma.Decimal(finalized.vatAmount) : null,
       perceptionsAmount:
-        perceptionsAmount != null
-          ? new Prisma.Decimal(perceptionsAmount)
+        finalized.perceptionsAmount != null
+          ? new Prisma.Decimal(finalized.perceptionsAmount)
           : null,
       totalAmount:
-        extracted.total_amount != null
-          ? new Prisma.Decimal(extracted.total_amount)
+        finalized.totalAmount != null
+          ? new Prisma.Decimal(finalized.totalAmount)
           : null,
       chartAccountId: chartAccount?.id ?? null,
-      aiConfidence: extracted.confidence,
+      aiConfidence: resolvedExtracted.confidence,
       aiPayload: aiPayloadOut as object,
       status: "READY",
     },
@@ -387,11 +422,16 @@ async function processInvoiceGroup(
   });
 
   try {
-    const { extracted, rawOcrText } = await extractFromParts(
-      uploadedParts,
-      extractOpts,
+    const { extracted, rawOcrText, visionImages, amountsSupplement } =
+      await extractFromParts(uploadedParts, extractOpts);
+    await applyExtractionToInvoice(
+      invoice.id,
+      userId,
+      extracted,
+      rawOcrText,
+      visionImages,
+      amountsSupplement,
     );
-    await applyExtractionToInvoice(invoice.id, userId, extracted, rawOcrText);
     revalidatePath(`/history/${invoice.id}`);
     return invoice.id;
   } catch (e) {
@@ -562,8 +602,15 @@ export async function uploadInvoice(formData: FormData) {
       const pdfText = await runOcr(buffer, mimeType);
       if (pdfEmbeddedTextIsWeak(pdfText)) {
         const pagePng = await rasterizePdfFirstPagePng(buffer);
-        visionImages = [{ buffer: pagePng, mimeType: "image/png" }];
-        extracted = await extractInvoiceDataFromImage(pagePng, "image/png", extractOpts);
+        const [preprocessed] = await preprocessVisionImages([
+          { buffer: pagePng, mimeType: "image/png" },
+        ]);
+        visionImages = [preprocessed];
+        extracted = await extractInvoiceDataFromImage(
+          preprocessed.buffer,
+          preprocessed.mimeType,
+          extractOpts,
+        );
         rawOcrText =
           pdfText.trim().length > 0
             ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en la página 1.]`
@@ -573,28 +620,48 @@ export async function uploadInvoice(formData: FormData) {
         extracted = await extractInvoiceData(pdfText, extractOpts);
       }
     } else {
-      visionImages = [
-        { buffer, mimeType: mimeType as "image/jpeg" | "image/png" },
-      ];
+      const [preprocessed] = await preprocessVisionImages([
+        {
+          buffer,
+          mimeType: mimeType as "image/jpeg" | "image/png",
+        },
+      ]);
+      visionImages = [preprocessed];
       extracted = await extractInvoiceDataFromImage(
-        buffer,
-        mimeType as "image/jpeg" | "image/png",
+        preprocessed.buffer,
+        preprocessed.mimeType,
         extractOpts,
       );
       rawOcrText = "[Campos inferidos por visión.]";
     }
 
-    extracted = await enrichExtractionFiscalAuth(extracted, {
-      rawOcrText,
-      visionImages,
+    let amountsSupplement: AmountsSupplement | null = null;
+    if (visionImages?.length) {
+      const footerImages = pickFooterVisionImages(visionImages);
+      const [enriched, supplement] = await Promise.all([
+        enrichExtractionFiscalAuth(extracted, {
+          rawOcrText,
+          visionImages: footerImages,
+        }),
+        fetchAmountsSupplementCropped(visionImages),
+      ]);
+      extracted = enriched;
+      amountsSupplement = supplement;
+    } else {
+      extracted = await enrichExtractionFiscalAuth(extracted, { rawOcrText });
+    }
+
+    const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
+      precomputedSupplement: amountsSupplement,
     });
+    const resolvedExtracted = finalized.extracted;
 
     const resolved = await resolveOrCreateInvoiceSupplier(
       userId,
-      extracted.provider,
-      extracted.cuit,
+      resolvedExtracted.provider,
+      resolvedExtracted.cuit,
     );
-    const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
+    const aiCuit = normalizeArgentineCuitFromAiOrNull(resolvedExtracted.cuit);
     const providerCuit = resolved?.cuit ?? aiCuit;
     const supplierCode = resolved?.code ?? null;
     const cuitResolution = await resolveEmpresaSucursalForInvoice(
@@ -604,27 +671,30 @@ export async function uploadInvoice(formData: FormData) {
 
     const chartAccount =
       (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
-      (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
+      (await resolveChartAccountForExtraction(userId, resolvedExtracted.chart_account_code, null));
 
-    const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
+    const invoiceDate = parseAiInvoiceDate(resolvedExtracted.invoice_date);
     const movementId = await allocateUniqueMovementId(invoiceDate);
-    const doc = resolveDocumentClassification(extracted, rawOcrText);
+    const doc = resolveDocumentClassification(resolvedExtracted, rawOcrText);
     const documentKind = doc.documentKind;
     const documentClass = doc.documentClass;
     const afipCode = doc.afipCode;
     const fiscalAuthType = doc.fiscalAuthType;
     const fiscalAuthCode = doc.fiscalAuthCode;
 
-    const vatFromLines = sumTaxLines(extracted.vat_lines);
-    const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
-    const vatAmount =
-      vatFromLines ?? extracted.vat_amount;
-    const perceptionsAmount =
-      perceptionsFromLines ?? extracted.perceptions_amount;
-
     const aiPayloadOut: Record<string, unknown> = {
-      ...(extracted as Record<string, unknown>),
+      ...(resolvedExtracted as Record<string, unknown>),
     };
+    aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
+    if (finalized.amountsDiscrepancy != null) {
+      aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
+    }
+    if (finalized.amountsAlgebraicallyDerived) {
+      aiPayloadOut.amounts_algebraically_derived = true;
+    }
+    if (finalized.correctedField) {
+      aiPayloadOut.amounts_corrected_field = finalized.correctedField;
+    }
     if (supplierCode) {
       aiPayloadOut.supplier_code = supplierCode;
     }
@@ -644,7 +714,7 @@ export async function uploadInvoice(formData: FormData) {
       where: { id: invoice.id },
       data: {
         rawOcrText,
-        providerName: extracted.provider,
+        providerName: resolvedExtracted.provider,
         providerCuit,
         supplierCode,
         empresa: cuitResolution.autoEmpresa,
@@ -656,26 +726,28 @@ export async function uploadInvoice(formData: FormData) {
         fiscalAuthType,
         fiscalAuthCode,
         invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(
-          extracted.invoice_number,
+          resolvedExtracted.invoice_number,
         ),
-        invoiceType: extracted.invoice_type,
+        invoiceType: resolvedExtracted.invoice_type,
         invoiceDate,
         netAmount:
-          extracted.net_amount != null
-            ? new Prisma.Decimal(extracted.net_amount)
+          finalized.netAmount != null
+            ? new Prisma.Decimal(finalized.netAmount)
             : null,
         vatAmount:
-          vatAmount != null ? new Prisma.Decimal(vatAmount) : null,
+          finalized.vatAmount != null
+            ? new Prisma.Decimal(finalized.vatAmount)
+            : null,
         perceptionsAmount:
-          perceptionsAmount != null
-            ? new Prisma.Decimal(perceptionsAmount)
+          finalized.perceptionsAmount != null
+            ? new Prisma.Decimal(finalized.perceptionsAmount)
             : null,
         totalAmount:
-          extracted.total_amount != null
-            ? new Prisma.Decimal(extracted.total_amount)
+          finalized.totalAmount != null
+            ? new Prisma.Decimal(finalized.totalAmount)
             : null,
         chartAccountId: chartAccount?.id ?? null,
-        aiConfidence: extracted.confidence,
+        aiConfidence: resolvedExtracted.confidence,
         aiPayload: aiPayloadOut as object,
         status: "READY",
       },

@@ -12,6 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildInvoiceJson } from "@/lib/invoice-json";
+import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
+import { formatMoney } from "@/lib/format-money";
 import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
@@ -80,6 +82,7 @@ export function InvoiceDetail({
   );
 
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+  const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
 
   const contableJson = buildInvoiceJson({
     movementId: invoice.movementId,
@@ -120,6 +123,14 @@ export function InvoiceDetail({
         <Badge variant={invoice.status === "ERROR" ? "destructive" : "secondary"}>
           {invoice.status}
         </Badge>
+        {amountsReview.needsReview ? (
+          <Badge variant="outline" className="border-amber-500 text-amber-800 dark:text-amber-300">
+            Revisar importes
+            {amountsReview.discrepancy != null
+              ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
+              : ""}
+          </Badge>
+        ) : null}
         {invoice.aiConfidence != null ? (
           <span className="text-sm text-muted-foreground">
             Confianza IA: {(invoice.aiConfidence * 100).toFixed(0)}%

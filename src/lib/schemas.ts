@@ -69,12 +69,17 @@ export const invoiceExtractionSchema = z.object({
     .describe(
       "Tipo de documento según encabezado: FACTURA, NOTA_CREDITO, NOTA_DEBITO, REMITO (remito fiscal o de entrega), PRESUPUESTO (presupuesto, nota de pedido, parte diario u orden interna sin CAE/CAI/CAEA). Si hay CAE/CAI/CAEA es comprobante fiscal, no PRESUPUESTO.",
     ),
-  net_amount: z.number().nullable().describe("Importe neto gravado (sin IVA)"),
+  net_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Importe neto gravado (sin IVA). Suele aparecer como 'Subtotal', 'Neto gravado' o 'Importe neto' en el recuadro de totales. Debe cumplir: net_amount + vat_amount + perceptions_amount ≈ total_amount.",
+    ),
   vat_amount: z
     .number()
     .nullable()
     .describe(
-      "Total de IVA del comprobante. Debe coincidir con la suma de vat_lines si las devolvés.",
+      "Total de IVA del comprobante. Debe coincidir con la suma de vat_lines si las devolvés. Formato numérico interno: 1227.55 (sin separadores).",
     ),
   vat_lines: z
     .array(taxBreakdownLineSchema)
@@ -86,7 +91,7 @@ export const invoiceExtractionSchema = z.object({
     .number()
     .nullable()
     .describe(
-      "Total de percepciones. Debe coincidir con la suma de perception_lines si las devolvés.",
+      "Total de percepciones impositivas (IIBB, percepción IVA, etc.). Debe coincidir con la suma de perception_lines si las devolvés.",
     ),
   perception_lines: z
     .array(taxBreakdownLineSchema)
@@ -94,7 +99,12 @@ export const invoiceExtractionSchema = z.object({
     .describe(
       "Cada percepción por separado (IIBB, percepción IVA, etc.) con su importe. null si no hay percepciones.",
     ),
-  total_amount: z.number().nullable().describe("Importe total"),
+  total_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Importe total final a pagar del comprobante. Debe ser ≈ net_amount + vat_amount + perceptions_amount (+ otros tributos si los hubiera).",
+    ),
   chart_account_code: z
     .string()
     .nullable()
@@ -121,3 +131,43 @@ export const fiscalAuthSupplementSchema = z.object({
 });
 
 export type FiscalAuthSupplement = z.infer<typeof fiscalAuthSupplementSchema>;
+
+/** Extracción focalizada del recuadro de totales (segunda pasada de visión). */
+export const amountsSupplementSchema = z.object({
+  net_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Subtotal / neto gravado del recuadro de totales (sin IVA ni percepciones).",
+    ),
+  vat_amount: z
+    .number()
+    .nullable()
+    .describe("Total IVA del recuadro de totales."),
+  vat_lines: z
+    .array(taxBreakdownLineSchema)
+    .nullable()
+    .describe("Desglose de IVA si aparece en el recuadro de totales."),
+  perceptions_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Total percepciones del recuadro derecho: 'Total Percep. IIBB', 'Percepciones IIBB', etc.",
+    ),
+  perceptions_amount_secondary: z
+    .number()
+    .nullable()
+    .describe(
+      "Segunda aparición de percepciones IIBB en la caja 'Saldo en cuenta' / desglose inferior izquierdo ('Perc IIBB Buenos Aires', etc.). Debe coincidir con perceptions_amount; si difieren, devolvé ambos tal cual los leés.",
+    ),
+  perception_lines: z
+    .array(taxBreakdownLineSchema)
+    .nullable()
+    .describe("Desglose de percepciones si aparece en el recuadro."),
+  total_amount: z
+    .number()
+    .nullable()
+    .describe("Total final del recuadro de totales."),
+});
+
+export type AmountsSupplement = z.infer<typeof amountsSupplementSchema>;
