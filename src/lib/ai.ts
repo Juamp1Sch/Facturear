@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 
+import { acceptFiscalAuthSupplement } from "@/lib/document-class";
+import { withOpenAIRetry } from "@/lib/openai-retry";
 import { invoiceExtractionSchema, fiscalAuthSupplementSchema, type InvoiceExtraction } from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
@@ -15,6 +17,7 @@ const EXTRACTION_RULES = `- Montos: números en pesos (sin símbolo). Si hay var
 - invoice_number: si el encabezado AFIP muestra "Punto de Venta" / "Punto de Vta" y "Número" / "Comp. Nro" (típicamente arriba a la derecha, junto a FACTURA A/B/C), combiná ambos en NNNNN-NNNNNNNN (5 dígitos PV + guion + 8 dígitos número, con ceros a la izquierda; ej. PV 00004 y Nro 00059991 → 00004-00059991). No confundir con CAE, OC, códigos de ítem ni número de cliente. Si solo hay un número sin punto de venta, devolvé ese valor sin inventar PV.
 - Fecha: ISO YYYY-MM-DD.
 - invoice_type: letra del comprobante (A, B, C, M, E) si aparece.
+- document_title: título o encabezado principal impreso en grande (ej. "PARTE DIARIO", "PRESUPUESTO", "FACTURA A", "ORDEN DE COMPRA", "NOTA DE PEDIDO"). Devolvé el texto tal cual aparece; null si no hay título claro. NO confundir con nombre del proveedor ni con "O.DE COMPRA" como subtítulo.
 - afip_comprobante_code: el CÓDIGO DE COMPROBANTE AFIP/ARCA impreso en el documento. En comprobantes fiscales suele ser un recuadro "Cód. NN" / "Código NN" (1 a 3 dígitos) ubicado junto a la letra grande A/B/C (típicamente en el centro o arriba del comprobante; ej. 01, 06, 011). Devolvé SOLO ese número si está realmente impreso como código de comprobante AFIP. Devolvé null si es un presupuesto, nota de pedido, parte diario, remito interno, orden de compra o cualquier documento que NO tenga ese recuadro de código AFIP. NUNCA lo confundas con el número de comprobante, CAE/CAI/CAEA, punto de venta, código de artículo, número de cliente ni teléfono. Ante la duda, null.
 - fiscal_auth_type y fiscal_auth_code: autorización fiscal distinta del código de comprobante AFIP. Buscá en el PIE o esquina inferior del documento:
   • CAE: texto "CAE N°" / "CAE:" con número y "Vto. CAE" / "Fecha Vto. CAE" (facturas electrónicas).
@@ -62,20 +65,22 @@ export async function extractInvoiceData(
   const trimmed = rawOcrText.slice(0, 48_000);
   const systemContent = buildSystemPrompt(SYSTEM_PROMPT_TEXT, options);
 
-  const completion = await openai.beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemContent },
-      {
-        role: "user",
-        content: `Texto OCR de la factura. Para "cuit" usá solo el CUIT del EMISOR en cabecera/membrete (11 dígitos); ignorá CUITs de cliente o receptor en el cuerpo del texto. Para "invoice_number", si hay Punto de Venta y Número en cabecera, devolvé NNNNN-NNNNNNNN (ej. 00004-00059991).\n\n${trimmed}`,
-      },
-    ],
-    response_format: zodResponseFormat(
-      invoiceExtractionSchema,
-      "invoice_extraction",
-    ),
-  });
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemContent },
+        {
+          role: "user",
+          content: `Texto OCR de la factura. Para "cuit" usá solo el CUIT del EMISOR en cabecera/membrete (11 dígitos); ignorá CUITs de cliente o receptor en el cuerpo del texto. Para "invoice_number", si hay Punto de Venta y Número en cabecera, devolvé NNNNN-NNNNNNNN (ej. 00004-00059991).\n\n${trimmed}`,
+        },
+      ],
+      response_format: zodResponseFormat(
+        invoiceExtractionSchema,
+        "invoice_extraction",
+      ),
+    }),
+  );
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
@@ -93,29 +98,31 @@ export async function extractInvoiceDataFromImage(
   const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
   const systemContent = buildSystemPrompt(SYSTEM_PROMPT_VISION, options);
 
-  const completion = await openai.beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemContent },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991).",
-          },
-          {
-            type: "image_url",
-            image_url: { url: dataUrl, detail: "high" },
-          },
-        ],
-      },
-    ],
-    response_format: zodResponseFormat(
-      invoiceExtractionSchema,
-      "invoice_extraction",
-    ),
-  });
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemContent },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991).",
+            },
+            {
+              type: "image_url",
+              image_url: { url: dataUrl, detail: "high" },
+            },
+          ],
+        },
+      ],
+      response_format: zodResponseFormat(
+        invoiceExtractionSchema,
+        "invoice_extraction",
+      ),
+    }),
+  );
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
@@ -126,13 +133,14 @@ export async function extractInvoiceDataFromImage(
 
 const FISCAL_AUTH_VISION_PROMPT = `Sos un asistente contable para Argentina. Tu ÚNICA tarea es leer la autorización fiscal impresa en el PIE o ESQUINA INFERIOR del comprobante (últimos 15% de la página).
 
-Buscá específicamente:
-- CAI: texto "CAI:" seguido de un número largo (10-20 dígitos), a menudo junto a "Fecha Vencimiento" o "Vto. CAI". Muy común en remitos fiscales (letra R) en la esquina inferior derecha.
-- CAE: "CAE N°" / "CAE:" con número y "Vto. CAE" (facturas electrónicas).
+Buscá SOLO si el texto está explícito:
+- CAI: "CAI:" seguido de un número largo (10-20 dígitos), a menudo con "Fecha Vencimiento".
+- CAE: "CAE N°" / "CAE:" con número y "Vto. CAE".
 - CAEA: "CAEA" con número.
-- TICKET_FISCAL: controlador fiscal ("C.F.", "TIQUE").
 
-Devolvé fiscal_auth_type y fiscal_auth_code. Si no hay ninguna autorización legible en el pie, ambos null.`;
+NO reportes autorización en presupuestos, partes diarios, órdenes de compra ni notas de pedido internas (no tienen CAE/CAI/CAEA).
+NO reportes TICKET_FISCAL ni inventes números a partir de firmas, sellos, OC ni totales.
+Si no ves "CAE", "CAEA" o "CAI" con su número impreso en el pie, devolvé fiscal_auth_type y fiscal_auth_code null.`;
 
 /**
  * Segunda pasada de visión solo para CAE/CAEA/CAI cuando la extracción principal no los detectó.
@@ -147,7 +155,7 @@ export async function supplementFiscalAuthFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: "Enfocate en el pie de página y la esquina inferior derecha. ¿Hay CAE, CAEA o CAI impreso? Devolvé fiscal_auth_type y fiscal_auth_code.",
+      text: "Enfocate en el pie de página y la esquina inferior derecha. ¿Hay CAE, CAEA o CAI impreso con su número? Solo devolvé tipo y número si están explícitos; si no, ambos null.",
     },
     ...images.map((img) => ({
       type: "image_url" as const,
@@ -158,20 +166,25 @@ export async function supplementFiscalAuthFromImages(
     })),
   ];
 
-  const completion = await openai.beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    messages: [
-      { role: "system", content: FISCAL_AUTH_VISION_PROMPT },
-      { role: "user", content: userContent },
-    ],
-    response_format: zodResponseFormat(
-      fiscalAuthSupplementSchema,
-      "fiscal_auth_supplement",
-    ),
-  });
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: FISCAL_AUTH_VISION_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(
+        fiscalAuthSupplementSchema,
+        "fiscal_auth_supplement",
+      ),
+    }),
+  );
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed?.fiscal_auth_type) return null;
+
+  if (!acceptFiscalAuthSupplement(parsed)) return null;
+
   return {
     fiscal_auth_type: parsed.fiscal_auth_type,
     fiscal_auth_code: parsed.fiscal_auth_code,
@@ -211,17 +224,19 @@ export async function extractInvoiceDataFromImages(
     })),
   ];
 
-  const completion = await openai.beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemContent },
-      { role: "user", content: userContent },
-    ],
-    response_format: zodResponseFormat(
-      invoiceExtractionSchema,
-      "invoice_extraction",
-    ),
-  });
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemContent },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(
+        invoiceExtractionSchema,
+        "invoice_extraction",
+      ),
+    }),
+  );
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
