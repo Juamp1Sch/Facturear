@@ -1,0 +1,72 @@
+name: Cursor PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build diff
+        run: git diff origin/${{ github.base_ref }}...HEAD > pr-diff.txt
+
+      - name: Install Cursor CLI
+        run: |
+          curl https://cursor.com/install -fsS | bash
+          echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
+
+      - name: Run review (Auto)
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          AGENT_BIN=""
+          if command -v cursor-agent >/dev/null 2>&1; then
+            AGENT_BIN="cursor-agent"
+          elif command -v agent >/dev/null 2>&1; then
+            AGENT_BIN="agent"
+          else
+            echo "Cursor CLI not found after install"
+            exit 1
+          fi
+
+          "$AGENT_BIN" -p "$(cat .github/cursor-review-prompt.txt)" \
+            --model auto \
+            --output-format text \
+            --force
+
+      - name: Ensure review output exists
+        run: |
+          if [ ! -s review.md ]; then
+            cat > review.md <<'EOF'
+          ## Review automático (Cursor Auto)
+
+          ### Resumen
+          El agente no generó un reporte de review.
+
+          ### Veredicto
+
+          **CAMBIOS SUGERIDOS**
+
+          No se pudo completar el análisis automático. Revisá manualmente los cambios de esta PR.
+          EOF
+          fi
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file review.md \
+            --repo "${{ github.repository }}"
