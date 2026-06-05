@@ -57,6 +57,12 @@ export const invoiceExtractionSchema = z.object({
     .describe(
       "Número de la autorización fiscal leída (CAE, CAEA o CAI). Solo dígitos o el valor tal como aparece impreso (ej. 52076217180318). null si fiscal_auth_type es TICKET_FISCAL o no hay número legible.",
     ),
+  document_title: z
+    .string()
+    .nullable()
+    .describe(
+      "Título o encabezado principal del documento tal como está impreso en grande (ej. PARTE DIARIO, PRESUPUESTO, FACTURA A, ORDEN DE COMPRA, NOTA DE PEDIDO). null si no hay título claro.",
+    ),
   document_kind: z
     .enum(["FACTURA", "NOTA_CREDITO", "NOTA_DEBITO", "REMITO", "PRESUPUESTO"])
     .nullable()

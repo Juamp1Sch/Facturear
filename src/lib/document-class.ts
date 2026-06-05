@@ -68,6 +68,20 @@ const FISCAL_AUTH_TYPES = new Set<FiscalAuthType>([
   "TICKET_FISCAL",
 ]);
 
+const NON_FISCAL_TITLE_PATTERNS: RegExp[] = [
+  /\bPARTE\s+DIARIO\b/i,
+  /\bPRESUPUESTO\b/i,
+  /\bNOTA\s+DE\s+PEDIDO\b/i,
+  /\bORDEN\s+DE\s+COMPRA\b/i,
+  /\bO\.?\s*DE\s+COMPRA\b/i,
+  /\bREMITO\s+INTERNO\b/i,
+];
+
+const VISION_OCR_PLACEHOLDER_RE =
+  /^\[.*(?:inferidos por visión|campos inferidos)/i;
+
+const FISCAL_INVOICE_LETTERS = new Set(["A", "B", "C", "E", "M"]);
+
 export function parseFiscalAuthType(
   value: string | null | undefined,
 ): FiscalAuthType | null {
@@ -102,6 +116,23 @@ export function parseDocumentClass(
   return parseFiscalDocumentClass(v);
 }
 
+/** Número de CAE/CAEA/CAI con longitud creíble (8–20 dígitos). */
+export function isPlausibleFiscalAuthNumber(
+  code: string | null | undefined,
+): boolean {
+  if (!code?.trim()) return false;
+  const digits = code.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 20;
+}
+
+export function isNonFiscalDocumentTitle(
+  title: string | null | undefined,
+): boolean {
+  if (!title?.trim()) return false;
+  const t = title.trim();
+  return NON_FISCAL_TITLE_PATTERNS.some((re) => re.test(t));
+}
+
 function isAfipTicketCode(code: string | null): boolean {
   return code != null && TICKET_AFIP_CODES.has(code);
 }
@@ -113,6 +144,79 @@ function isAfipRemitoCode(code: string | null): boolean {
   return desc != null && /^REMITO/i.test(desc);
 }
 
+function hasUsableOcrText(text: string | null | undefined): boolean {
+  if (!text?.trim()) return false;
+  return !VISION_OCR_PLACEHOLDER_RE.test(text.trim());
+}
+
+function hasTicketKeywordInText(text: string | null | undefined): boolean {
+  if (!hasUsableOcrText(text)) return false;
+  const t = text!.replace(/\s+/g, " ");
+  return /\b(?:controlador\s+fiscal|c\.f\.|tique\s+factura|informe\s+diario\s+de\s+cierre)\b/i.test(
+    t,
+  );
+}
+
+export type SanitizedFiscalSignals = {
+  afipCode: string | null;
+  fiscalAuthType: FiscalAuthType | null;
+  fiscalAuthCode: string | null;
+};
+
+/** Descarta señales fiscales débiles no corroboradas (ticket bare, CAI/CAE sin número). */
+export function sanitizeCorroboratedFiscalSignals(
+  afipCodeRaw: string | null | undefined,
+  fiscalAuthTypeRaw: string | null | undefined,
+  fiscalAuthCodeRaw: string | null | undefined,
+  rawOcrText: string | null | undefined,
+): SanitizedFiscalSignals {
+  const afipCode = normalizeAfipCodeForStorage(afipCodeRaw);
+  let fiscalAuthType = parseFiscalAuthType(fiscalAuthTypeRaw);
+  let fiscalAuthCode = normalizeFiscalAuthCodeForStorage(
+    fiscalAuthType,
+    fiscalAuthCodeRaw,
+  );
+
+  if (
+    fiscalAuthType === "CAE" ||
+    fiscalAuthType === "CAEA" ||
+    fiscalAuthType === "CAI"
+  ) {
+    if (!isPlausibleFiscalAuthNumber(fiscalAuthCode)) {
+      fiscalAuthType = null;
+      fiscalAuthCode = null;
+    }
+  }
+
+  if (fiscalAuthType === "TICKET_FISCAL") {
+    const corroborated =
+      hasTicketKeywordInText(rawOcrText) || isAfipTicketCode(afipCode);
+    if (!corroborated) {
+      fiscalAuthType = null;
+    }
+    fiscalAuthCode = null;
+  }
+
+  return { afipCode, fiscalAuthType, fiscalAuthCode };
+}
+
+/** Señal fiscal que justifica comprobante AFIP (código validado o CAE/CAI/CAEA con número). */
+export function hasStrongFiscalSignal(
+  afipCode: string | null,
+  fiscalAuthType: FiscalAuthType | null,
+  fiscalAuthCode: string | null,
+): boolean {
+  if (isKnownAfipComprobanteCode(afipCode)) return true;
+  if (
+    fiscalAuthType === "CAE" ||
+    fiscalAuthType === "CAEA" ||
+    fiscalAuthType === "CAI"
+  ) {
+    return isPlausibleFiscalAuthNumber(fiscalAuthCode);
+  }
+  return false;
+}
+
 function hasFiscalSignal(
   afipCode: string | null,
   fiscalAuthType: FiscalAuthType | null,
@@ -121,7 +225,7 @@ function hasFiscalSignal(
 }
 
 /**
- * Subtipo fiscal según señales AFIP/CAE/CAEA/CAI/ticket. null si no es fiscal.
+ * Subtipo fiscal según señales AFIP/CAE/CAEA/CAI/ticket ya corroboradas. null si no es fiscal.
  */
 export function deriveFiscalDocumentClass(
   afipCodeRaw: string | null | undefined,
@@ -162,6 +266,77 @@ export type ResolvedDocumentClassification = {
   fiscalAuthCode: string | null;
 };
 
+function presupuestoClassification(): ResolvedDocumentClassification {
+  return {
+    documentKind: "PRESUPUESTO",
+    documentClass: null,
+    afipCode: null,
+    fiscalAuthType: null,
+    fiscalAuthCode: null,
+  };
+}
+
+/** ¿Correr segunda pasada de visión buscando CAE/CAI en el pie? */
+export function shouldRunFiscalAuthSupplement(
+  extracted: InvoiceExtraction,
+): boolean {
+  if (parseDocumentKind(extracted.document_kind) === "PRESUPUESTO") {
+    return false;
+  }
+  if (isNonFiscalDocumentTitle(extracted.document_title)) {
+    return false;
+  }
+
+  const letter = extracted.invoice_type?.trim().toUpperCase();
+  if (letter && FISCAL_INVOICE_LETTERS.has(letter)) {
+    return true;
+  }
+
+  if (extracted.afip_comprobante_code?.trim()) {
+    return true;
+  }
+
+  const kind = parseDocumentKind(extracted.document_kind);
+  if (
+    kind === "FACTURA" ||
+    kind === "NOTA_CREDITO" ||
+    kind === "NOTA_DEBITO"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Valida resultado de la segunda pasada de visión antes de fusionarlo. */
+export function acceptFiscalAuthSupplement(
+  supplement: {
+    fiscal_auth_type: FiscalAuthType | null;
+    fiscal_auth_code: string | null;
+  } | null,
+): supplement is {
+  fiscal_auth_type: FiscalAuthType;
+  fiscal_auth_code: string | null;
+} {
+  if (!supplement?.fiscal_auth_type) return false;
+
+  const { fiscal_auth_type, fiscal_auth_code } = supplement;
+
+  if (fiscal_auth_type === "TICKET_FISCAL") {
+    return false;
+  }
+
+  if (
+    fiscal_auth_type === "CAE" ||
+    fiscal_auth_type === "CAEA" ||
+    fiscal_auth_type === "CAI"
+  ) {
+    return isPlausibleFiscalAuthNumber(fiscal_auth_code);
+  }
+
+  return false;
+}
+
 /**
  * Resuelve tipo de documento (incl. Presupuesto) y clase fiscal a partir de la
  * extracción IA, enriquecida con detección de CAE/CAI en texto OCR.
@@ -172,21 +347,30 @@ export function resolveDocumentClassification(
 ): ResolvedDocumentClassification {
   const enriched = enrichFiscalAuthFromText(extracted, rawOcrText);
 
-  const afipCode = normalizeAfipCodeForStorage(enriched.afip_comprobante_code);
-  const fiscalAuthType = parseFiscalAuthType(enriched.fiscal_auth_type);
-  const fiscalAuthCode = normalizeFiscalAuthCodeForStorage(
-    fiscalAuthType,
-    enriched.fiscal_auth_code,
-  );
-
-  const documentClass = deriveFiscalDocumentClass(
+  const sanitized = sanitizeCorroboratedFiscalSignals(
     enriched.afip_comprobante_code,
     enriched.fiscal_auth_type,
+    enriched.fiscal_auth_code,
+    rawOcrText,
+  );
+
+  const { afipCode, fiscalAuthType, fiscalAuthCode } = sanitized;
+
+  if (
+    isNonFiscalDocumentTitle(enriched.document_title) &&
+    !hasStrongFiscalSignal(afipCode, fiscalAuthType, fiscalAuthCode)
+  ) {
+    return presupuestoClassification();
+  }
+
+  const documentClass = deriveFiscalDocumentClass(
+    afipCode,
+    fiscalAuthType,
   );
 
   if (!documentClass) {
     const letterR = enriched.invoice_type?.trim().toUpperCase() === "R";
-    if (letterR) {
+    if (letterR && !isNonFiscalDocumentTitle(enriched.document_title)) {
       return {
         documentKind: "REMITO",
         documentClass: "REMITO_FISCAL",
@@ -196,19 +380,17 @@ export function resolveDocumentClassification(
       };
     }
 
-    return {
-      documentKind: "PRESUPUESTO",
-      documentClass: null,
-      afipCode,
-      fiscalAuthType,
-      fiscalAuthCode,
-    };
+    return presupuestoClassification();
   }
 
   let documentKind = parseDocumentKind(enriched.document_kind);
   if (documentClass === "REMITO_FISCAL") {
     documentKind = "REMITO";
-  } else if (!documentKind || documentKind === "PRESUPUESTO" || documentKind === "REMITO") {
+  } else if (
+    !documentKind ||
+    documentKind === "PRESUPUESTO" ||
+    documentKind === "REMITO"
+  ) {
     documentKind = "FACTURA";
   }
 

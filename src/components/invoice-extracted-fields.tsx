@@ -30,7 +30,6 @@ import {
 import {
   DOCUMENT_CLASS_OPTIONS,
   documentClassLabel,
-  fiscalAuthTypeLabel,
   isPresupuestoDocument,
   parseDocumentClass,
   parseFiscalDocumentClass,
@@ -61,16 +60,6 @@ function documentClassBadgeClass(value: string | null): string {
     return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
   }
   return "bg-muted text-muted-foreground";
-}
-
-function fiscalAuthDisplay(
-  fiscalAuthType: string | null,
-  fiscalAuthCode: string | null,
-): string | null {
-  const label = fiscalAuthTypeLabel(fiscalAuthType);
-  if (!label) return null;
-  if (fiscalAuthCode?.trim()) return `${label} ${fiscalAuthCode.trim()}`;
-  return label;
 }
 
 function amountInputDefault(value: string | null | undefined): string {
@@ -565,16 +554,6 @@ export function InvoiceExtractedFields({
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
-                {invoice.afipCode ? (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    Cód. AFIP {invoice.afipCode}
-                  </span>
-                ) : null}
-                {fiscalAuthDisplay(invoice.fiscalAuthType, invoice.fiscalAuthCode) ? (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {fiscalAuthDisplay(invoice.fiscalAuthType, invoice.fiscalAuthCode)}
-                  </span>
-                ) : null}
               </dd>
             </div>
             ) : null}

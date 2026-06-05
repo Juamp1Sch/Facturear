@@ -52,11 +52,16 @@ import {
   resolveDocumentClassification,
 } from "@/lib/document-class";
 import { rememberSupplierAlias } from "@/lib/supplier-alias";
+import { formatOpenAIExtractionError } from "@/lib/openai-retry";
 import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
-const BATCH_CONCURRENCY = 3;
+/** Una factura a la vez por defecto: cada una hace 1–2 llamadas vision (alto TPM). */
+const BATCH_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.BATCH_CONCURRENCY ?? "1") || 1,
+);
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 export type UploadBatchState =
@@ -390,7 +395,7 @@ async function processInvoiceGroup(
     revalidatePath(`/history/${invoice.id}`);
     return invoice.id;
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Error desconocido";
+    const message = formatOpenAIExtractionError(e);
     await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
@@ -676,7 +681,7 @@ export async function uploadInvoice(formData: FormData) {
       },
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Error desconocido";
+    const message = formatOpenAIExtractionError(e);
     await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
