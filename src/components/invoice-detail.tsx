@@ -169,7 +169,10 @@ export function InvoiceDetail({
           </CardContent>
         </Card>
 
-        <InvoiceExtractedFields invoice={invoice} />
+        <InvoiceExtractedFields
+          invoice={invoice}
+          perceptionAccountCount={taxChartAccounts.perceptionsAccounts.length}
+        />
       </div>
 
       <Card>

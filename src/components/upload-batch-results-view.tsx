@@ -215,6 +215,7 @@ export function UploadBatchResultsView({
         <InvoiceExtractedFields
           invoice={invoice}
           onInvoiceUpdated={onInvoiceUpdated}
+          perceptionAccountCount={taxChartAccounts.perceptionsAccounts.length}
         />
       </div>
 

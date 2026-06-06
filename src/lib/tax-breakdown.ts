@@ -55,12 +55,48 @@ export function parseDiscountFromPayload(
       ? rawAmount
       : null;
   const storedResolution = parseDiscountResolutionFromPayload(aiPayload);
+  const amountContext = {
+    net_amount:
+      typeof o.net_amount === "number" && !Number.isNaN(o.net_amount)
+        ? o.net_amount
+        : null,
+    vat_amount:
+      typeof o.vat_amount === "number" && !Number.isNaN(o.vat_amount)
+        ? o.vat_amount
+        : null,
+    perceptions_amount:
+      typeof o.perceptions_amount === "number" &&
+      !Number.isNaN(o.perceptions_amount)
+        ? o.perceptions_amount
+        : null,
+    total_amount:
+      typeof o.total_amount === "number" && !Number.isNaN(o.total_amount)
+        ? o.total_amount
+        : null,
+  };
   return resolveDiscountBreakdown(
     discountLines,
     fromLines ?? fromField,
     rawOcrText,
     storedResolution,
+    amountContext,
   );
+}
+
+/** Aviso cuando hay varias cuentas de percepción pero el JSON usaría solo la primera. */
+export function needsPerceptionBreakdownWarning(
+  aiPayload: unknown,
+  perceptionsAmount: string | number | null | undefined,
+  perceptionAccountCount: number,
+): boolean {
+  if (perceptionAccountCount <= 1) return false;
+  const amount =
+    perceptionsAmount != null && perceptionsAmount !== ""
+      ? Number(perceptionsAmount)
+      : 0;
+  if (Number.isNaN(amount) || amount <= 0) return false;
+  const { perceptionLines } = parseTaxBreakdownFromPayload(aiPayload);
+  return !perceptionLines?.length;
 }
 
 export function sumTaxLines(lines: TaxBreakdownLine[] | null | undefined): number | null {

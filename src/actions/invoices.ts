@@ -26,6 +26,7 @@ import {
   preprocessVisionImages,
 } from "@/lib/image-preprocess";
 import type { AmountsSupplement, DiscountSupplement } from "@/lib/schemas";
+import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import { buildVatLinesFromRates, sumVatFromRates } from "@/lib/vat-rate";
 import { enrichExtractionFiscalAuth } from "@/lib/enrich-extraction-fiscal-auth";
 import {
@@ -1095,6 +1096,18 @@ export async function updateInvoiceExtractedFields(
     );
     if (vatLines) nextPayload.vat_lines = vatLines;
     else delete nextPayload.vat_lines;
+  } else {
+    const vatNum = vatAmount != null ? Number(vatAmount) : null;
+    if (vatNum != null && vatNum > 0) {
+      const existingVatLines = parseTaxBreakdownFromPayload(existingPayload).vatLines;
+      const label =
+        existingVatLines?.length === 1
+          ? existingVatLines[0]!.label
+          : "IVA 21%";
+      nextPayload.vat_lines = [{ label, amount: vatNum }];
+    } else {
+      delete nextPayload.vat_lines;
+    }
   }
   if (netAmount != null) nextPayload.net_amount = Number(netAmount);
   else delete nextPayload.net_amount;

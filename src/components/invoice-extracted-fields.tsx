@@ -23,7 +23,7 @@ import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoic
 import { formatMoney } from "@/lib/format-money";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
 import type { DocumentKind } from "@/lib/comprobante-code";
-import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import { parseDiscountFromPayload, parseTaxBreakdownFromPayload, needsPerceptionBreakdownWarning } from "@/lib/tax-breakdown";
 import { groupVatLinesByRate, getVatAmountForCode } from "@/lib/vat-rate";
 import {
   DOCUMENT_KIND_OPTIONS,
@@ -95,9 +95,12 @@ function EditFormActions({ onCancel }: { onCancel: () => void }) {
 export function InvoiceExtractedFields({
   invoice: invoiceProp,
   onInvoiceUpdated,
+  perceptionAccountCount = 0,
 }: {
   invoice: SerializedInvoiceDetail;
   onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
+  /** Cantidad de cuentas de percepción configuradas (para aviso de desglose). */
+  perceptionAccountCount?: number;
 }) {
   const router = useRouter();
   const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
@@ -201,6 +204,11 @@ export function InvoiceExtractedFields({
   const showDiscriminatedVatEdit =
     vatRateGroups.length > 1 ||
     vatRateGroups.some((group) => group.ivaCode === "I10");
+  const showPerceptionBreakdownWarning = needsPerceptionBreakdownWarning(
+    invoice.aiPayload,
+    invoice.perceptionsAmount,
+    perceptionAccountCount,
+  );
 
   return (
     <Card>
@@ -240,6 +248,15 @@ export function InvoiceExtractedFields({
               ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
               : ""}
             . Corregí los valores en Editar.
+          </div>
+        ) : null}
+
+        {showPerceptionBreakdownWarning ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            Tenés {perceptionAccountCount} cuentas de percepción configuradas, pero esta
+            factura no trae desglose por renglón. El JSON contable asignará todo el importe
+            a la primera cuenta hasta que la extracción incluya{" "}
+            <code className="text-xs">perception_lines</code>.
           </div>
         ) : null}
 

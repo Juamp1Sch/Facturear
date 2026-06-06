@@ -1,14 +1,11 @@
 import {
-  locateDiscountRegion,
   supplementAmountsFromImages,
   supplementDiscountFromImages,
 } from "@/lib/ai";
 import {
   cropDiscountHeuristicRegions,
   cropDiscountRegions,
-  cropNormalizedBox,
   cropTotalsRegions,
-  pickFooterVisionImages,
   type VisionImage,
 } from "@/lib/image-preprocess";
 import {
@@ -239,28 +236,10 @@ export async function fetchDiscountSupplementCropped(
 ): Promise<DiscountSupplement | null> {
   if (visionImages.length === 0) return null;
 
-  const target = pickFooterVisionImages(visionImages)[0];
-
   const heuristicCrops = await cropDiscountHeuristicRegions(visionImages);
   if (heuristicCrops.length > 0) {
     const fromHeuristic = await supplementDiscountFromImages(heuristicCrops);
     if (fromHeuristic?.discount_lines?.length) return fromHeuristic;
-  }
-
-  if (target) {
-    const region = await locateDiscountRegion([target]);
-    if (region?.found) {
-      const tightCrop = await cropNormalizedBox(target.buffer, {
-        x0: region.x0,
-        y0: region.y0,
-        x1: region.x1,
-        y1: region.y1,
-      });
-      if (tightCrop) {
-        const fromTight = await supplementDiscountFromImages([tightCrop]);
-        if (fromTight?.discount_lines?.length) return fromTight;
-      }
-    }
   }
 
   const discountCrops = await cropDiscountRegions(visionImages);

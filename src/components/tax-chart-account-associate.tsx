@@ -135,6 +135,13 @@ export function TaxChartAccountAssociate({ data }: { data: TaxAssociationFormDat
                 <p className="text-xs text-muted-foreground">
                   Podés sumar varias cuentas. Aparecerán en el JSON como una línea por cuenta.
                 </p>
+                {orderedPerceptionIds.length > 1 ? (
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                    Con más de una cuenta, las facturas deben traer desglose de percepciones
+                    (<code className="text-[10px]">perception_lines</code> en la extracción).
+                    Si no hay desglose, todo el importe se asigna a la primera cuenta.
+                  </p>
+                ) : null}
               </div>
 
               {orderedPerceptionIds.length > 0 ? (

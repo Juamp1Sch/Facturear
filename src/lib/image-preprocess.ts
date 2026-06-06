@@ -186,7 +186,11 @@ export async function cropTotalsRegions(
   );
 }
 
-/** Caja típica del bloque BONIFICACION en facturas Jeluz (centro-derecha, sobre Subtotal). */
+/**
+ * Caja típica del bloque BONIFICACION en facturas Jeluz (centro-derecha, sobre Subtotal).
+ * Calibrada en imágenes ~576×1024; otros layouts o proveedores pueden requerir el fallback
+ * por bandas verticales (`cropDiscountRegions`).
+ */
 export const DEFAULT_BONIFICACION_HEURISTIC_BOX: NormalizedBox = {
   x0: 0.45,
   y0: 0.56,

@@ -140,23 +140,96 @@ function discountLinesFromExtraction(
   return lines?.filter((l) => l.amount > 0) ?? [];
 }
 function dedupeWithinSource(lines: TaxBreakdownLine[]): TaxBreakdownLine[] {
-  const byAmount = new Map<number, TaxBreakdownLine>();
+  const seen = new Set<string>();
+  const result: TaxBreakdownLine[] = [];
   for (const line of lines) {
     if (line.amount <= 0) continue;
     const amount = roundMoney(line.amount);
-    const existing = byAmount.get(amount);
-    if (!existing || line.label.trim().length > existing.label.trim().length) {
-      byAmount.set(amount, { label: line.label.trim() || "Bonificación", amount });
-    }
+    const label = line.label.trim() || "Bonificación";
+    const key = `${label.toLowerCase()}|${amount}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ label, amount });
   }
-  return Array.from(byAmount.values()).sort((a, b) => b.amount - a.amount);
+  return result.sort((a, b) => b.amount - a.amount);
+}
+
+const JELUZ_STYLE_BONIFICACION =
+  /bonificaci[oó]n\s+(general|especial|adicional)/i;
+
+function hasJeluzStyleBonificacionLabel(
+  lines: TaxBreakdownLine[],
+  supplementSteps: DiscountPercentageStep[],
+): boolean {
+  return (
+    lines.some((l) => JELUZ_STYLE_BONIFICACION.test(l.label)) ||
+    supplementSteps.some((s) => JELUZ_STYLE_BONIFICACION.test(s.label))
+  );
+}
+
+function amountsReconcileWithoutDiscount(extracted: InvoiceExtraction): boolean {
+  const net = extracted.net_amount;
+  const total = extracted.total_amount;
+  if (net == null || total == null) return false;
+  const sum = roundMoney(
+    net + (extracted.vat_amount ?? 0) + (extracted.perceptions_amount ?? 0),
+  );
+  return Math.abs(sum - total) <= 0.05;
+}
+
+/** Descuentos ya incluidos en el subtotal o falsos positivos de extracción. */
+export function shouldSuppressDiscountDisplay(
+  extracted: InvoiceExtraction,
+  lines: TaxBreakdownLine[],
+  supplementSteps: DiscountPercentageStep[],
+  chosenSource: DiscountSourceId | null,
+): boolean {
+  const discountTotal = sumTaxLines(lines);
+
+  if (hasJeluzStyleBonificacionLabel(lines, supplementSteps)) {
+    return false;
+  }
+
+  if (amountsReconcileWithoutDiscount(extracted)) {
+    return true;
+  }
+
+  if (discountTotal == null || discountTotal <= 0) {
+    return false;
+  }
+
+  const netAmount = extracted.net_amount;
+  if (netAmount != null && netAmount > 0 && Math.abs(discountTotal - netAmount) <= 0.02) {
+    if (
+      chosenSource === "computed" &&
+      supplementSteps.length >= 1 &&
+      supplementSteps.every((s) => Math.abs(s.percentage - 50) <= 0.01)
+    ) {
+      return true;
+    }
+    return chosenSource === "ia" && lines.length <= 2;
+  }
+
+  return false;
+}
+
+/** @deprecated Use shouldSuppressDiscountDisplay */
+export const isLikelyFalsePositiveDiscount = shouldSuppressDiscountDisplay;
+
+function clearedDiscountExtracted(
+  extracted: InvoiceExtraction,
+): InvoiceExtraction {
+  return {
+    ...extracted,
+    discount_lines: null,
+    discount_amount: null,
+  };
 }
 
 /**
- * Elige UNA sola fuente en vez de unir todas: unir importes mal leídos (cada fuente
- * confunde dígitos distintos) infla el total. Preferimos OCR de texto (exacto), luego
- * la relectura de visión recortada, y por último la extracción principal; a igual
- * prioridad gana la que tenga más renglones.
+ * Elige UNA sola fuente en vez de unir todas: unir importes mal leídos infla el total.
+ * Preferimos cálculo (neto + % secuenciales del supplement) cuando hay porcentajes;
+ * si no, OCR de texto y luego extracción principal; a igual prioridad gana más renglones.
  */
 function chooseDiscountSource(
   fromComputed: TaxBreakdownLine[],
@@ -246,11 +319,14 @@ export function enrichExtractedDiscounts(
 
   if (lines.length === 0) {
     return {
-      extracted: {
-        ...extracted,
-        discount_lines: null,
-        discount_amount: null,
-      },
+      extracted: clearedDiscountExtracted(extracted),
+      debug: null,
+    };
+  }
+
+  if (shouldSuppressDiscountDisplay(extracted, lines, supplementSteps, source)) {
+    return {
+      extracted: clearedDiscountExtracted(extracted),
       debug: null,
     };
   }
@@ -392,27 +468,81 @@ export function resolveDiscountBreakdown(
   discountAmount: number | null,
   rawOcrText?: string | null,
   storedResolution?: DiscountResolutionDebug | null,
+  amountContext?: Pick<
+    InvoiceExtraction,
+    "net_amount" | "vat_amount" | "perceptions_amount" | "total_amount"
+  >,
 ): { discountLines: TaxBreakdownLine[] | null; discountAmount: number | null } {
+  const extractedForSanity: InvoiceExtraction = {
+    provider: null,
+    cuit: null,
+    invoice_date: null,
+    invoice_number: null,
+    invoice_type: null,
+    afip_comprobante_code: null,
+    fiscal_auth_type: null,
+    fiscal_auth_code: null,
+    document_title: null,
+    document_kind: null,
+    net_amount: amountContext?.net_amount ?? null,
+    vat_amount: amountContext?.vat_amount ?? null,
+    vat_lines: null,
+    perceptions_amount: amountContext?.perceptions_amount ?? null,
+    perception_lines: null,
+    discount_lines: null,
+    discount_amount: null,
+    total_amount: amountContext?.total_amount ?? null,
+    chart_account_code: null,
+    confidence: 0,
+  };
+
   if (storedResolution?.merged.length) {
+    const lines = storedResolution.merged.map((line) => ({
+      label: line.label,
+      amount: line.amount,
+    }));
+    if (
+      shouldSuppressDiscountDisplay(
+        extractedForSanity,
+        lines,
+        storedResolution.sources.supplement,
+        storedResolution.chosenSource,
+      )
+    ) {
+      return { discountLines: null, discountAmount: null };
+    }
     return {
-      discountLines: storedResolution.merged.map((line) => ({
-        label: line.label,
-        amount: line.amount,
-      })),
+      discountLines: lines,
       discountAmount: storedResolution.total,
     };
   }
 
   const fromPayload = discountLinesFromExtraction(discountLines);
   const fromText = parseBonificacionLinesFromText(rawOcrText);
-  const { lines } = chooseDiscountSource([], fromPayload, fromText);
+  const { source, lines } = chooseDiscountSource([], fromPayload, fromText);
 
   if (lines.length === 0) {
+    const amount =
+      discountAmount != null && discountAmount > 0 ? discountAmount : null;
+    if (
+      amount != null &&
+      shouldSuppressDiscountDisplay(
+        extractedForSanity,
+        [{ label: "Descuento", amount }],
+        [],
+        "ia",
+      )
+    ) {
+      return { discountLines: null, discountAmount: null };
+    }
     return {
       discountLines: null,
-      discountAmount:
-        discountAmount != null && discountAmount > 0 ? discountAmount : null,
+      discountAmount: amount,
     };
+  }
+
+  if (shouldSuppressDiscountDisplay(extractedForSanity, lines, [], source)) {
+    return { discountLines: null, discountAmount: null };
   }
 
   return {
