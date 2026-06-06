@@ -8,11 +8,9 @@ import {
   fiscalAuthSupplementSchema,
   amountsSupplementSchema,
   discountSupplementSchema,
-  discountRegionSchema,
   type InvoiceExtraction,
   type AmountsSupplement,
   type DiscountSupplement,
-  type DiscountRegion,
 } from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
@@ -329,53 +327,6 @@ export async function supplementAmountsFromImages(
   );
 
   return completion.choices[0]?.message?.parsed ?? null;
-}
-
-const DISCOUNT_REGION_VISION_PROMPT = `Sos un asistente que localiza regiones en una factura. Tu ÚNICA tarea es ubicar el BLOQUE de filas de bonificaciones/descuentos.
-
-Buscá las filas que dicen "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL", "Descuento" (suelen tener un % y un importe negativo). En facturas Jeluz están en el centro-derecha, debajo del detalle de ítems y arriba del recuadro Subtotal.
-
-Devolvé una caja (coordenadas NORMALIZADAS 0-1, origen arriba-izquierda) que CONTENGA TODAS las filas de bonificación, INCLUYENDO la columna de importes a la derecha:
-- x0,y0 = esquina superior izquierda (incluí desde la palabra "BONIFICACION").
-- x1,y1 = esquina inferior derecha (incluí el final del importe más a la derecha).
-Dejá un pequeño margen. Si no hay bonificaciones, found=false.`;
-
-/** Primer paso: localiza el bloque de bonificaciones para recortarlo ajustado. */
-export async function locateDiscountRegion(
-  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
-): Promise<DiscountRegion | null> {
-  if (images.length === 0) return null;
-
-  const openai = getOpenAI();
-  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-    {
-      type: "text",
-      text: "Ubicá el bloque de filas BONIFICACION/Descuento y devolvé su caja normalizada (incluí la columna de importes a la derecha).",
-    },
-    ...images.map((img) => ({
-      type: "image_url" as const,
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
-        detail: "high" as const,
-      },
-    })),
-  ];
-
-  const completion = await withOpenAIRetry(() =>
-    openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
-      messages: [
-        { role: "system", content: DISCOUNT_REGION_VISION_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      response_format: zodResponseFormat(discountRegionSchema, "discount_region"),
-    }),
-  );
-
-  const parsed = completion.choices[0]?.message?.parsed;
-  if (!parsed?.found) return null;
-  return parsed;
 }
 
 const DISCOUNT_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. Tu ÚNICA tarea es leer las filas de bonificaciones/descuentos GLOBALES y devolver el PORCENTAJE de cada una.

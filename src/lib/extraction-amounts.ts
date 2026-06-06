@@ -17,7 +17,7 @@ import {
   type AmountFields,
 } from "@/lib/amount-reconcile";
 import type { AmountsSupplement, DiscountSupplement, InvoiceExtraction } from "@/lib/schemas";
-import { sumTaxLines } from "@/lib/tax-breakdown";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 export type FinalizedAmounts = {
   netAmount: number | null;

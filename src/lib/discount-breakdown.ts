@@ -3,7 +3,7 @@ import type {
   InvoiceExtraction,
   TaxBreakdownLine,
 } from "@/lib/schemas";
-import { sumTaxLines } from "@/lib/tax-breakdown";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 export type DiscountSourceId = "computed" | "ia" | "supplement" | "ocr";
 
@@ -296,6 +296,81 @@ export type DiscountEnrichmentResult = {
   extracted: InvoiceExtraction;
   debug: DiscountResolutionDebug | null;
 };
+
+/** Tras editar net_amount a mano, recalcula bonificaciones desde % guardados o limpia datos viejos. */
+export function syncDiscountPayloadAfterNetChange(
+  existingPayload: Record<string, unknown>,
+  nextPayload: Record<string, unknown>,
+  previousNet: number | null,
+  newNet: number | null,
+): void {
+  if (
+    previousNet != null &&
+    newNet != null &&
+    Math.abs(previousNet - newNet) <= 0.001
+  ) {
+    return;
+  }
+  if (previousNet === newNet) return;
+
+  const resolution = parseDiscountResolutionFromPayload(existingPayload);
+  const supplementSteps = resolution?.sources.supplement ?? [];
+
+  if (supplementSteps.length === 0 || newNet == null || newNet <= 0) {
+    delete nextPayload.discount_lines;
+    delete nextPayload.discount_amount;
+    delete nextPayload.discount_resolution;
+    return;
+  }
+
+  const extracted: InvoiceExtraction = {
+    provider: null,
+    cuit: null,
+    invoice_date: null,
+    invoice_number: null,
+    invoice_type: null,
+    afip_comprobante_code: null,
+    fiscal_auth_type: null,
+    fiscal_auth_code: null,
+    document_title: null,
+    document_kind: null,
+    net_amount: newNet,
+    vat_amount:
+      typeof nextPayload.vat_amount === "number" ? nextPayload.vat_amount : null,
+    vat_lines: null,
+    perceptions_amount:
+      typeof nextPayload.perceptions_amount === "number"
+        ? nextPayload.perceptions_amount
+        : null,
+    perception_lines: null,
+    discount_lines: null,
+    discount_amount: null,
+    total_amount:
+      typeof nextPayload.total_amount === "number" ? nextPayload.total_amount : null,
+    chart_account_code: null,
+    confidence: 0,
+  };
+
+  const { extracted: resolved, debug } = enrichExtractedDiscounts(extracted, {
+    supplement: {
+      discount_lines: supplementSteps.map((step) => ({
+        label: step.label,
+        percentage: step.percentage,
+      })),
+    },
+  });
+
+  if (resolved.discount_lines?.length && resolved.discount_amount != null) {
+    nextPayload.discount_lines = resolved.discount_lines;
+    nextPayload.discount_amount = resolved.discount_amount;
+    if (debug) nextPayload.discount_resolution = debug;
+    else delete nextPayload.discount_resolution;
+  } else {
+    delete nextPayload.discount_lines;
+    delete nextPayload.discount_amount;
+    delete nextPayload.discount_resolution;
+  }
+}
 
 /** Unifica discount_lines/discount_amount desde IA, OCR y/o supplement de visión. */
 export function enrichExtractedDiscounts(

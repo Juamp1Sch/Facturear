@@ -15,6 +15,7 @@ import {
 import {
   enrichExtractedDiscounts,
   logDiscountResolution,
+  syncDiscountPayloadAfterNetChange,
 } from "@/lib/discount-breakdown";
 import {
   fetchAmountsSupplementCropped,
@@ -1120,6 +1121,19 @@ export async function updateInvoiceExtractedFields(
   }
   if (totalAmount != null) nextPayload.total_amount = Number(totalAmount);
   else delete nextPayload.total_amount;
+
+  const previousNet =
+    existing.netAmount != null
+      ? Number(existing.netAmount)
+      : typeof existingPayload.net_amount === "number"
+        ? existingPayload.net_amount
+        : null;
+  syncDiscountPayloadAfterNetChange(
+    existingPayload,
+    nextPayload,
+    previousNet,
+    netAmount != null ? Number(netAmount) : null,
+  );
 
   await prisma.invoice.update({
     where: { id: invoiceId },

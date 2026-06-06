@@ -209,20 +209,3 @@ export const discountSupplementSchema = z.object({
 });
 
 export type DiscountSupplement = z.infer<typeof discountSupplementSchema>;
-
-/** Localización del bloque de bonificaciones (coordenadas normalizadas 0-1) para recorte ampliado. */
-export const discountRegionSchema = z.object({
-  found: z
-    .boolean()
-    .describe("true si hay un bloque de filas BONIFICACION/Descuento visible."),
-  x0: z.number().describe("Borde izquierdo del bloque, fracción 0-1 del ancho."),
-  y0: z.number().describe("Borde superior del bloque, fracción 0-1 del alto."),
-  x1: z.number().describe("Borde derecho del bloque (incluye la columna de importes), fracción 0-1."),
-  y1: z.number().describe("Borde inferior del bloque, fracción 0-1 del alto."),
-  row_count: z
-    .number()
-    .nullable()
-    .describe("Cantidad de filas de bonificación visibles en el bloque."),
-});
-
-export type DiscountRegion = z.infer<typeof discountRegionSchema>;

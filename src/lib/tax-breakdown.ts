@@ -3,8 +3,10 @@ import {
   resolveDiscountBreakdown,
 } from "@/lib/discount-breakdown";
 import type { TaxBreakdownLine } from "@/lib/schemas";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 export type { TaxBreakdownLine };
+export { sumTaxLines } from "@/lib/tax-lines";
 
 function isTaxLine(value: unknown): value is TaxBreakdownLine {
   return (
@@ -97,10 +99,4 @@ export function needsPerceptionBreakdownWarning(
   if (Number.isNaN(amount) || amount <= 0) return false;
   const { perceptionLines } = parseTaxBreakdownFromPayload(aiPayload);
   return !perceptionLines?.length;
-}
-
-export function sumTaxLines(lines: TaxBreakdownLine[] | null | undefined): number | null {
-  if (!lines?.length) return null;
-  const total = lines.reduce((acc, l) => acc + l.amount, 0);
-  return total > 0 ? total : null;
 }
