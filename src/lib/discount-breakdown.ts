@@ -145,7 +145,7 @@ function dedupeWithinSource(lines: TaxBreakdownLine[]): TaxBreakdownLine[] {
   for (const line of lines) {
     if (line.amount <= 0) continue;
     const amount = roundMoney(line.amount);
-    const label = line.label.trim() || "Bonificación";
+    const label = (line.label ?? "").trim() || "Bonificación";
     const key = `${label.toLowerCase()}|${amount}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -218,7 +218,7 @@ function hasJeluzStyleBonificacionLabel(
   supplementSteps: DiscountPercentageStep[],
 ): boolean {
   return (
-    lines.some((l) => JELUZ_STYLE_BONIFICACION.test(l.label)) ||
+    lines.some((l) => JELUZ_STYLE_BONIFICACION.test(l.label ?? "")) ||
     supplementSteps.some((s) => JELUZ_STYLE_BONIFICACION.test(s.label))
   );
 }
@@ -296,9 +296,9 @@ function chooseDiscountSource(
     return { source: "computed", lines: fromComputed };
   }
 
-  const candidates: { source: DiscountSourceId; lines: TaxBreakdownLine[]; priority: number }[] = [
-    { source: "ocr", lines: dedupeWithinSource(fromText), priority: 3 },
-    { source: "ia", lines: dedupeWithinSource(fromAi), priority: 1 },
+  const candidates = [
+    { source: "ocr" as const, lines: dedupeWithinSource(fromText), priority: 3 },
+    { source: "ia" as const, lines: dedupeWithinSource(fromAi), priority: 1 },
   ].filter((c) => c.lines.length > 0);
 
   if (candidates.length === 0) return { source: null, lines: [] };
@@ -333,7 +333,11 @@ function buildDiscountDebug(
     if (chosenSource === "computed" && supplementSteps.length > 0) {
       sources.push("supplement");
     }
-    return { label: line.label, amount, sources: [...new Set(sources)].sort() };
+    return {
+      label: (line.label ?? "").trim() || "Bonificación",
+      amount,
+      sources: [...new Set(sources)].sort(),
+    };
   });
 
   return {

@@ -23,6 +23,8 @@ function base(): InvoiceExtraction {
     total_amount: 626150.25,
     vat_lines: null,
     perception_lines: null,
+    discount_amount: null,
+    discount_lines: null,
     chart_account_code: null,
     confidence: 0.9,
   };
