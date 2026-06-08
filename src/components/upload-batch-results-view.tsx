@@ -17,7 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildInvoiceJson } from "@/lib/invoice-json";
-import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
 import type { SerializedBatchInvoice } from "@/types/invoice";
 
@@ -129,6 +129,10 @@ export function UploadBatchResultsView({
   );
 
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+  const discountBreakdown = parseDiscountFromPayload(
+    invoice.aiPayload,
+    invoice.rawOcrText,
+  );
   const contableJson = buildInvoiceJson({
     movementId: invoice.movementId,
     empresa: invoice.empresa,
@@ -143,10 +147,16 @@ export function UploadBatchResultsView({
     vatLines: taxBreakdown.vatLines,
     perceptionsAmount: invoice.perceptionsAmount,
     perceptionLines: taxBreakdown.perceptionLines,
+    discountAmount:
+      discountBreakdown.discountAmount != null
+        ? String(discountBreakdown.discountAmount)
+        : null,
+    discountLines: discountBreakdown.discountLines,
     totalAmount: invoice.totalAmount,
     chartAccount: invoice.chartAccount,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
     perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
   });
 
   const uploadDisabledReason =
@@ -205,6 +215,7 @@ export function UploadBatchResultsView({
         <InvoiceExtractedFields
           invoice={invoice}
           onInvoiceUpdated={onInvoiceUpdated}
+          perceptionAccountCount={taxChartAccounts.perceptionsAccounts.length}
         />
       </div>
 

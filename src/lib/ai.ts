@@ -7,8 +7,10 @@ import {
   invoiceExtractionSchema,
   fiscalAuthSupplementSchema,
   amountsSupplementSchema,
+  discountSupplementSchema,
   type InvoiceExtraction,
   type AmountsSupplement,
+  type DiscountSupplement,
 } from "@/lib/schemas";
 
 export type InvoiceExtractOptions = {
@@ -20,8 +22,11 @@ export type InvoiceExtractOptions = {
 
 const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
   • Formato argentino impreso: miles con PUNTO, decimales con COMA (ej. "1.227,55" = 1227.55; "61,38" = 61.38). Ignorá el prefijo "USD", "$" o "ARS" y devolvé el número decimal interno (1227.55).
-  • Leé el RECUADRO DE TOTALES del pie de factura (típicamente abajo a la derecha): Subtotal/Neto, Total IVA, Total Percep./Percepciones, Total.
-  • ANTES de responder, verificá que net_amount + vat_amount + perceptions_amount ≈ total_amount (tolerancia centavos). Si NO cierra, RELEÉ dígito por dígito cada importe del recuadro de totales; no inventes ni redondees de más.
+  • Leé el RECUADRO DE TOTALES del pie de factura (típicamente abajo a la derecha): Subtotal/Neto gravado, Total IVA, Total Percep./Percepciones, Total final.
+  • net_amount = importe ANTES de IVA y percepciones (suele decir "Subtotal", "Neto gravado", "Importe neto"). Es el importe base, normalmente el MENOR del recuadro. NO uses filas rotuladas "TOTAL NETO", "Total a pagar" ni el total final como net_amount sin verificar.
+  • total_amount = importe FINAL del comprobante (= Subtotal + IVA + percepciones). Algunos comprobantes rotulan mal el total final como "TOTAL NETO" o "Neto": si ese número = Subtotal + IVA + percepciones, es total_amount, NO net_amount; suele ser el MAYOR del recuadro.
+  • Devolvé SIEMPRE net_amount y total_amount por separado si ambos aparecen en el recuadro, aunque tengan rótulos parecidos ("Neto", "TOTAL NETO", "Total").
+  • ANTES de responder, verificá que net_amount + vat_amount + perceptions_amount ≈ total_amount (tolerancia centavos). Si NO cierra, RELEÉ: el neto gravado suele ser el MENOR importe base del recuadro (Subtotal); el total final el MAYOR que cierra la suma.
   • Si hay caja "Saldo en cuenta" o desglose lateral (abajo a la izquierda) con "Perc IIBB", usala para validar el Total Percep. IIBB del recuadro derecho; si difieren, releé ambos.
   • Dígitos similares: prestá atención a 1/7, 2/3, 4/6, 5/8, 0/8. Si un dígito es ambiguo, preferí el valor que hace cerrar la suma con el Total impreso.
   • Si hay varios totales, elegí el total final a pagar del recuadro principal de totales.
@@ -42,8 +47,10 @@ const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
 - Desglose fiscal (pie de factura / tabla de impuestos / totales): leé cada renglón por separado.
 - vat_lines: cada fila de IVA con label (ej. "IVA 21%", "IVA 10,5%") y amount. Si hay un solo importe de IVA, un solo elemento. null si no hay IVA.
 - vat_amount: suma de los amount de vat_lines, o el único importe de IVA si no hay desglose.
-- perception_lines: cada percepción impositiva con label (ej. "Percepción IIBB", "Per. IVA") y amount. null si no hay percepciones.
+- perception_lines: cada percepción impositiva CON IMPORTE MAYOR A 0, con label que indique el tipo y amount. Distinguí percepción de IIBB/ingresos brutos (ej. "Perc. IIBB Bs.As.", "Percepción IIBB CABA") de percepción de IVA (ej. "Perc. IVA", "Percepción IVA"). IMPORTANTE: a veces hay una grilla titulada "PERCEPCIONES IIBB" con varias jurisdicciones (C.A.B.A., Bs.As., Tucumán, etc.) en 0,00 y, dentro o debajo de esa misma grilla, un renglón "Perc. IVA" con importe; en ese caso devolvé SOLO los renglones con importe > 0 y conservá su tipo real ("Perc. IVA" es percepción de IVA aunque esté bajo el título IIBB). NO incluyas renglones en 0,00. null si no hay ninguna percepción con importe.
 - perceptions_amount: suma de los amount de perception_lines, o el total de percepciones si no hay desglose.
+- discount_lines: ARRAY con UN elemento por cada bonificación GLOBAL con importe > 0 (ej. filas "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" repetidas — Jeluz). CRÍTICO: si hay 7 filas Jeluz, devolvé 7 objetos. NO incluyas: columna "Bon (%)" del detalle; renglones "DESCUENTO X %" del detalle si el Subtotal del pie ya los refleja (LIPO, SAP, etc.); rótulos sin importe (ej. "BONIFICACION EN MERCADERIAS"); Subtotal ni "Saldo en cuenta". Si neto+IVA+percepciones≈total y los descuentos solo aparecen en el detalle de ítems, discount_lines null.
+- discount_amount: suma de discount_lines. null si los descuentos ya están incluidos en net_amount/subtotal. NO sumes bonificaciones en el cuadre net+IVA+percepciones≈total.
 Para el resto de campos: si un dato no está en el texto o no es legible en la imagen, devolvé null. Para "cuit", solo null si en la cabecera del emisor no hay ningún CUIT legible. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
 
 const SYSTEM_PROMPT_TEXT = `Sos un asistente contable para Argentina. A partir del texto OCR de una factura de proveedor, extraé campos estructurados.
@@ -128,7 +135,7 @@ export async function extractInvoiceDataFromImage(
           content: [
             {
               type: "text",
-              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991). Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.",
+              text: "Extraé los datos estructurados de esta factura (imagen). Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante (bloque superior del vendedor); ignorá CUITs de cliente o receptor en el medio o abajo del documento. Para invoice_number, si en cabecera (arriba a la derecha) hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN (ej. 00004-00059991). Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total. Para bonificaciones: solo filas GLOBALES BONIFICACION GENERAL/ESPECIAL/ADICIONAL (Jeluz); NO uses la columna Bon (%) del detalle de ítems ni el Subtotal como bonificación.",
             },
             {
               type: "image_url",
@@ -234,7 +241,7 @@ export async function extractInvoiceDataFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN. Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total.`,
+      text: `Estas ${images.length} imágenes (${partLabels}) son partes de un mismo comprobante de factura. Combiná la información de todas las páginas en una única extracción estructurada. Para el campo cuit usá únicamente el CUIT del EMISOR en la cabecera del comprobante. Para invoice_number, si en cabecera hay Punto de Venta y Número, combiná en NNNNN-NNNNNNNN. Para importes, leé el recuadro de totales y verificá que neto+IVA+percepciones≈total. Para bonificaciones: solo filas GLOBALES BONIFICACION GENERAL/ESPECIAL/ADICIONAL; NO uses la columna Bon (%) del detalle de ítems ni el Subtotal como bonificación.`,
     },
     ...images.map((img) => ({
       type: "image_url" as const,
@@ -270,11 +277,12 @@ export async function extractInvoiceDataFromImages(
 const AMOUNTS_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. La imagen es un RECORTE AMPLIADO de la franja inferior del comprobante (recuadro de totales a la derecha y, si aparece, caja "Saldo en cuenta" / desglose a la izquierda).
 
 Buscá y devolvé SOLO estos importes:
-- net_amount: "Subtotal", "Neto gravado", "Importe neto" (recuadro derecho, sin IVA ni percepciones).
-- vat_amount: "Total IVA", "IVA 21%", suma de IVA.
+- net_amount: "Subtotal", "Neto gravado", "Importe neto" — importe SIN IVA ni percepciones (suele ser la fila base más chica del recuadro). NO confundas con "TOTAL NETO" ni "Neto" del pie si ese valor = Subtotal + IVA + percepciones (en ese caso es total_amount, no net_amount).
+- vat_amount: "Total IVA", suma de renglones IVA 21% / 10,5%.
 - perceptions_amount: "Total Percep. IIBB" / "Percepciones IIBB" del RECUADRO DERECHO de totales.
 - perceptions_amount_secondary: "Perc IIBB" / percepción IIBB en la caja "Saldo en cuenta" o desglose INFERIOR IZQUIERDO (si está visible). Debe coincidir con perceptions_amount; si leés valores distintos, devolvé ambos.
-- total_amount: "Total" final a pagar (fila más abajo del recuadro derecho). Releé dígito por dígito (6 vs 4: 1.546,72 vs 1.544,72).
+- total_amount: total FINAL a pagar (Subtotal + IVA + percepciones). Puede figurar como "Total", "TOTAL NETO" o "Neto" en el pie — verificá que sea la suma, no el Subtotal.
+- Devolvé SIEMPRE net_amount y total_amount por separado si ambos están visibles, aunque el rótulo del total diga "TOTAL NETO" o "Neto".
 
 Reglas CRÍTICAS:
 - Formato argentino: miles con punto, decimales con coma (1.227,55 → 1227.55). Ignorá "USD" o "$".
@@ -296,7 +304,7 @@ export async function supplementAmountsFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: "Esta imagen es un recorte ampliado del pie de la factura. Leé Subtotal, Total IVA, Total Percep. IIBB (derecha), Perc IIBB en Saldo en cuenta (izquierda, si aparece) y Total final. Cruzá ambas percepciones; deben coincidir. Releé Total y Percepciones dígito por dígito (6 vs 4).",
+      text: "Esta imagen es un recorte ampliado del pie de la factura. Leé Subtotal (neto gravado), IVA, Percepciones y total FINAL. Si una fila dice TOTAL NETO o Neto pero su valor = Subtotal + IVA + percepciones, es el total final, no el subtotal. Cruzá percepciones izquierda/derecha. Releé dígitos (6 vs 4).",
     },
     ...images.map((img) => ({
       type: "image_url" as const,
@@ -318,6 +326,64 @@ export async function supplementAmountsFromImages(
       response_format: zodResponseFormat(
         amountsSupplementSchema,
         "amounts_supplement",
+      ),
+    }),
+  );
+
+  return completion.choices[0]?.message?.parsed ?? null;
+}
+
+const DISCOUNT_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. Tu ÚNICA tarea es leer las filas de bonificaciones/descuentos GLOBALES y devolver el PORCENTAJE de cada una.
+
+Las filas válidas suelen decir "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" (puede repetirse) con un porcentaje (ej. 20,00 %, 16,00 %).
+
+IGNORÁ por completo:
+- La columna "Bon (%)" / "Bon" / "Bonificación" del DETALLE DE ÍTEMS (descuento por línea, ya incluido en SubTotal s/IVA).
+- Filas repetidas del mismo % en cada ítem (ej. Bon 50,00% en 6 artículos) — eso NO es bonificación global.
+- El Subtotal, "Saldo en cuenta" ni totales del pie.
+
+La imagen es un recorte AMPLIADO del bloque de bonificaciones (escala de grises).
+
+Reglas CRÍTICAS:
+- discount_lines: UN objeto por cada fila GLOBAL visible. Si hay 7 filas Jeluz, devolvé 7 objetos.
+- percentage: SOLO el número del porcentaje (20 para 20,00 %; 10,5 para 10,50 %). NO devuelvas importes en pesos.
+- Leé el porcentaje con cuidado (20 vs 19, 16 vs 15, 10 vs 19).
+- NO incluyas filas sin porcentaje legible. Si solo hay Bon (%) por ítem o no hay bonificaciones globales, discount_lines null.`;
+
+/**
+ * Segunda pasada de visión enfocada en la columna de bonificaciones cuando la extracción principal no las lista todas.
+ */
+export async function supplementDiscountFromImages(
+  images: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
+): Promise<DiscountSupplement | null> {
+  if (images.length === 0) return null;
+
+  const openai = getOpenAI();
+  const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: "Leé SOLO filas BONIFICACION GENERAL/ESPECIAL/ADICIONAL (bonificación global). Ignorá la columna Bon (%) del detalle de ítems. Devolvé label y percentage de cada fila global (NO importes). Si no hay bonificaciones globales, discount_lines null.",
+    },
+    ...images.map((img) => ({
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.buffer.toString("base64")}`,
+        detail: "high" as const,
+      },
+    })),
+  ];
+
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse({
+      model: getOpenAIModel(),
+      temperature: EXTRACTION_TEMPERATURE,
+      messages: [
+        { role: "system", content: DISCOUNT_SUPPLEMENT_VISION_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      response_format: zodResponseFormat(
+        discountSupplementSchema,
+        "discount_supplement",
       ),
     }),
   );

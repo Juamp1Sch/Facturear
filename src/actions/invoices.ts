@@ -13,14 +13,22 @@ import {
   extractInvoiceDataFromImages,
 } from "@/lib/ai";
 import {
+  enrichExtractedDiscounts,
+  hasAnyDiscountSignal,
+  logDiscountResolution,
+} from "@/lib/discount-breakdown";
+import {
   fetchAmountsSupplementCropped,
+  fetchDiscountSupplementCropped,
   finalizeExtractedAmounts,
 } from "@/lib/extraction-amounts";
 import {
   pickFooterVisionImages,
   preprocessVisionImages,
 } from "@/lib/image-preprocess";
-import type { AmountsSupplement } from "@/lib/schemas";
+import type { AmountsSupplement, DiscountSupplement } from "@/lib/schemas";
+import { parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
+import { buildVatLinesFromRates, sumVatFromRates } from "@/lib/vat-rate";
 import { enrichExtractionFiscalAuth } from "@/lib/enrich-extraction-fiscal-auth";
 import {
   serializeInvoiceForBatch,
@@ -65,10 +73,14 @@ import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
-/** Una factura a la vez por defecto: cada una hace 1–2 llamadas vision (alto TPM). */
+/**
+ * Facturas procesadas en paralelo. En Tier 1 de OpenAI (gpt-4o = 30.000 TPM) el cuello
+ * de botella es el TPM, no el RPM: con 2 alcanza y más solo gatilla 429 + backoff.
+ * Al pasar a Tier 2 (~450.000 TPM) conviene subir a 4-5 vía BATCH_CONCURRENCY en .env.
+ */
 const BATCH_CONCURRENCY = Math.max(
   1,
-  Number(process.env.BATCH_CONCURRENCY ?? "1") || 1,
+  Number(process.env.BATCH_CONCURRENCY ?? "2") || 2,
 );
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
@@ -192,6 +204,7 @@ async function extractFromParts(
   rawOcrText: string | null;
   visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[];
   amountsSupplement?: AmountsSupplement | null;
+  discountSupplement?: DiscountSupplement | null;
 }> {
   const pdfTexts: { partNum: number; text: string; weak: boolean }[] = [];
   const allPdf = parts.every((p) => p.mimeType === "application/pdf");
@@ -240,24 +253,36 @@ async function extractFromParts(
   }
 
   const preprocessedImages = await preprocessVisionImages(visionImages);
-  const extracted = await extractInvoiceDataFromImages(preprocessedImages, extractOpts);
+  // La relectura de totales no depende de la extracción principal: corren en paralelo.
+  const [extracted, amountsSupplement] = await Promise.all([
+    extractInvoiceDataFromImages(preprocessedImages, extractOpts),
+    fetchAmountsSupplementCropped(preprocessedImages),
+  ]);
   const rawOcrText =
     ocrNotes.length > 0
       ? `${ocrNotes.join("\n\n")}\n\n[Campos inferidos por visión en ${parts.length} parte(s).]`
       : `[${parts.length} parte(s): campos inferidos por visión.]`;
   const footerImages = pickFooterVisionImages(preprocessedImages);
-  const [enriched, amountsSupplement] = await Promise.all([
+  const wantDiscount = hasAnyDiscountSignal({ extracted, rawOcrText });
+  const [enriched, discountSupplement] = await Promise.all([
     enrichExtractionFiscalAuth(extracted, {
       rawOcrText,
       visionImages: footerImages,
     }),
-    fetchAmountsSupplementCropped(preprocessedImages),
+    wantDiscount
+      ? fetchDiscountSupplementCropped(preprocessedImages, {
+          rawOcrText,
+          providerName: extracted.provider,
+          discountLines: extracted.discount_lines,
+        })
+      : Promise.resolve(null),
   ]);
   return {
     extracted: enriched,
     rawOcrText,
     visionImages: preprocessedImages,
     amountsSupplement,
+    discountSupplement,
   };
 }
 
@@ -268,6 +293,7 @@ async function applyExtractionToInvoice(
   rawOcrText: string | null,
   visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
   amountsSupplement?: AmountsSupplement | null,
+  discountSupplement?: DiscountSupplement | null,
 ): Promise<void> {
   const prior = await prisma.invoice.findFirst({
     where: { id: invoiceId },
@@ -308,11 +334,19 @@ async function applyExtractionToInvoice(
   const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
     precomputedSupplement: amountsSupplement,
   });
-  const resolvedExtracted = finalized.extracted;
+  const { extracted: resolvedExtracted, debug: discountResolution } =
+    enrichExtractedDiscounts(finalized.extracted, {
+      rawOcrText,
+      supplement: discountSupplement,
+    });
+  logDiscountResolution(`invoice:${invoiceId}`, discountResolution);
 
   const aiPayloadOut: Record<string, unknown> = {
     ...(resolvedExtracted as Record<string, unknown>),
   };
+  if (discountResolution) {
+    aiPayloadOut.discount_resolution = discountResolution;
+  }
   aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
   if (finalized.amountsDiscrepancy != null) {
     aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
@@ -422,7 +456,7 @@ async function processInvoiceGroup(
   });
 
   try {
-    const { extracted, rawOcrText, visionImages, amountsSupplement } =
+    const { extracted, rawOcrText, visionImages, amountsSupplement, discountSupplement } =
       await extractFromParts(uploadedParts, extractOpts);
     await applyExtractionToInvoice(
       invoice.id,
@@ -431,6 +465,7 @@ async function processInvoiceGroup(
       rawOcrText,
       visionImages,
       amountsSupplement,
+      discountSupplement,
     );
     revalidatePath(`/history/${invoice.id}`);
     return invoice.id;
@@ -636,17 +671,27 @@ export async function uploadInvoice(formData: FormData) {
     }
 
     let amountsSupplement: AmountsSupplement | null = null;
+    let discountSupplement: DiscountSupplement | null = null;
     if (visionImages?.length) {
       const footerImages = pickFooterVisionImages(visionImages);
-      const [enriched, supplement] = await Promise.all([
+      const wantDiscount = hasAnyDiscountSignal({ extracted, rawOcrText });
+      const [enriched, supplement, discountSupp] = await Promise.all([
         enrichExtractionFiscalAuth(extracted, {
           rawOcrText,
           visionImages: footerImages,
         }),
         fetchAmountsSupplementCropped(visionImages),
+        wantDiscount
+          ? fetchDiscountSupplementCropped(visionImages, {
+              rawOcrText,
+              providerName: extracted.provider,
+              discountLines: extracted.discount_lines,
+            })
+          : Promise.resolve(null),
       ]);
       extracted = enriched;
       amountsSupplement = supplement;
+      discountSupplement = discountSupp;
     } else {
       extracted = await enrichExtractionFiscalAuth(extracted, { rawOcrText });
     }
@@ -654,7 +699,12 @@ export async function uploadInvoice(formData: FormData) {
     const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
       precomputedSupplement: amountsSupplement,
     });
-    const resolvedExtracted = finalized.extracted;
+    const { extracted: resolvedExtracted, debug: discountResolution } =
+      enrichExtractedDiscounts(finalized.extracted, {
+        rawOcrText,
+        supplement: discountSupplement,
+      });
+    logDiscountResolution("uploadSingle", discountResolution);
 
     const resolved = await resolveOrCreateInvoiceSupplier(
       userId,
@@ -685,6 +735,9 @@ export async function uploadInvoice(formData: FormData) {
     const aiPayloadOut: Record<string, unknown> = {
       ...(resolvedExtracted as Record<string, unknown>),
     };
+    if (discountResolution) {
+      aiPayloadOut.discount_resolution = discountResolution;
+    }
     aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
     if (finalized.amountsDiscrepancy != null) {
       aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
@@ -987,11 +1040,27 @@ export async function updateInvoiceExtractedFields(
   let netAmount: Prisma.Decimal | null;
   let vatAmount: Prisma.Decimal | null;
   let perceptionsAmount: Prisma.Decimal | null;
+  let discountAmount: Prisma.Decimal | null;
   let totalAmount: Prisma.Decimal | null;
+  const vatBreakdownDiscriminated =
+    formData.get("vatBreakdownDiscriminated") === "1";
+  let vat21Parsed: Prisma.Decimal | null = null;
+  let vat105Parsed: Prisma.Decimal | null = null;
   try {
     netAmount = parseMoneyFromForm(formData.get("netAmount"));
-    vatAmount = parseMoneyFromForm(formData.get("vatAmount"));
+    if (vatBreakdownDiscriminated) {
+      vat21Parsed = parseMoneyFromForm(formData.get("vatAmount21"));
+      vat105Parsed = parseMoneyFromForm(formData.get("vatAmount105"));
+      const vatTotal = sumVatFromRates(
+        vat21Parsed != null ? Number(vat21Parsed) : null,
+        vat105Parsed != null ? Number(vat105Parsed) : null,
+      );
+      vatAmount = vatTotal != null ? new Prisma.Decimal(vatTotal) : null;
+    } else {
+      vatAmount = parseMoneyFromForm(formData.get("vatAmount"));
+    }
     perceptionsAmount = parseMoneyFromForm(formData.get("perceptionsAmount"));
+    discountAmount = parseMoneyFromForm(formData.get("discountAmount"));
     totalAmount = parseMoneyFromForm(formData.get("totalAmount"));
   } catch (e) {
     if (e instanceof Error && e.message === "MONTO_INVALIDO") {
@@ -1043,6 +1112,47 @@ export async function updateInvoiceExtractedFields(
   } else {
     delete nextPayload.chart_account_code;
     delete nextPayload.chart_account_name;
+  }
+  if (vatBreakdownDiscriminated) {
+    const vatLines = buildVatLinesFromRates(
+      vat21Parsed != null ? Number(vat21Parsed) : null,
+      vat105Parsed != null ? Number(vat105Parsed) : null,
+    );
+    if (vatLines) nextPayload.vat_lines = vatLines;
+    else delete nextPayload.vat_lines;
+  } else {
+    const vatNum = vatAmount != null ? Number(vatAmount) : null;
+    if (vatNum != null && vatNum > 0) {
+      const existingVatLines = parseTaxBreakdownFromPayload(existingPayload).vatLines;
+      const label =
+        existingVatLines?.length === 1
+          ? existingVatLines[0]!.label
+          : "IVA 21%";
+      nextPayload.vat_lines = [{ label, amount: vatNum }];
+    } else {
+      delete nextPayload.vat_lines;
+    }
+  }
+  if (netAmount != null) nextPayload.net_amount = Number(netAmount);
+  else delete nextPayload.net_amount;
+  if (vatAmount != null) nextPayload.vat_amount = Number(vatAmount);
+  else delete nextPayload.vat_amount;
+  if (perceptionsAmount != null) {
+    nextPayload.perceptions_amount = Number(perceptionsAmount);
+  } else {
+    delete nextPayload.perceptions_amount;
+  }
+  if (totalAmount != null) nextPayload.total_amount = Number(totalAmount);
+  else delete nextPayload.total_amount;
+  const discountNum = discountAmount != null ? Number(discountAmount) : null;
+  if (discountNum != null && discountNum > 0) {
+    nextPayload.discount_amount = discountNum;
+    nextPayload.discount_lines = [{ label: "Bonificación", amount: discountNum }];
+    delete nextPayload.discount_resolution;
+  } else {
+    delete nextPayload.discount_amount;
+    delete nextPayload.discount_lines;
+    delete nextPayload.discount_resolution;
   }
 
   await prisma.invoice.update({

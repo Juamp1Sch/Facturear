@@ -23,6 +23,8 @@ import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoic
 import { formatMoney } from "@/lib/format-money";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
 import type { DocumentKind } from "@/lib/comprobante-code";
+import { parseDiscountFromPayload, parseTaxBreakdownFromPayload, needsPerceptionBreakdownWarning } from "@/lib/tax-breakdown";
+import { groupVatLinesByRate, getVatAmountForCode } from "@/lib/vat-rate";
 import {
   DOCUMENT_KIND_OPTIONS,
   documentKindLabel,
@@ -63,9 +65,9 @@ function documentClassBadgeClass(value: string | null): string {
   return "bg-muted text-muted-foreground";
 }
 
-function amountInputDefault(value: string | null | undefined): string {
+function amountInputDefault(value: string | number | null | undefined): string {
   if (value == null || value === "") return "";
-  const n = Number(value);
+  const n = typeof value === "number" ? value : Number(value);
   return Number.isNaN(n) ? "" : String(n);
 }
 
@@ -93,9 +95,12 @@ function EditFormActions({ onCancel }: { onCancel: () => void }) {
 export function InvoiceExtractedFields({
   invoice: invoiceProp,
   onInvoiceUpdated,
+  perceptionAccountCount = 0,
 }: {
   invoice: SerializedInvoiceDetail;
   onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
+  /** Cantidad de cuentas de percepción configuradas (para aviso de desglose). */
+  perceptionAccountCount?: number;
 }) {
   const router = useRouter();
   const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
@@ -188,6 +193,22 @@ export function InvoiceExtractedFields({
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
+  const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
+  const discountBreakdown = parseDiscountFromPayload(
+    invoice.aiPayload,
+    invoice.rawOcrText,
+  );
+  const vatRateGroups = taxBreakdown.vatLines
+    ? groupVatLinesByRate(taxBreakdown.vatLines)
+    : [];
+  const showDiscriminatedVatEdit =
+    vatRateGroups.length > 1 ||
+    vatRateGroups.some((group) => group.ivaCode === "I10");
+  const showPerceptionBreakdownWarning = needsPerceptionBreakdownWarning(
+    invoice.aiPayload,
+    invoice.perceptionsAmount,
+    perceptionAccountCount,
+  );
 
   return (
     <Card>
@@ -227,6 +248,15 @@ export function InvoiceExtractedFields({
               ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
               : ""}
             . Corregí los valores en Editar.
+          </div>
+        ) : null}
+
+        {showPerceptionBreakdownWarning ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            Tenés {perceptionAccountCount} cuentas de percepción configuradas, pero esta
+            factura no trae desglose por renglón. El JSON contable asignará todo el importe
+            a la primera cuenta hasta que la extracción incluya{" "}
+            <code className="text-xs">perception_lines</code>.
           </div>
         ) : null}
 
@@ -383,18 +413,52 @@ export function InvoiceExtractedFields({
                   placeholder="0 o 1234,56"
                 />
               </div>
-              <div className="space-y-2">
-                <label htmlFor="vatAmount" className="text-sm font-medium">
-                  IVA
-                </label>
-                <Input
-                  id="vatAmount"
-                  name="vatAmount"
-                  defaultValue={amountInputDefault(invoice.vatAmount)}
-                  inputMode="decimal"
-                  placeholder="0 o 1234,56"
-                />
-              </div>
+              {showDiscriminatedVatEdit ? (
+                <>
+                  <input type="hidden" name="vatBreakdownDiscriminated" value="1" />
+                  <div className="space-y-2">
+                    <label htmlFor="vatAmount21" className="text-sm font-medium">
+                      IVA 21%
+                    </label>
+                    <Input
+                      id="vatAmount21"
+                      name="vatAmount21"
+                      defaultValue={amountInputDefault(
+                        getVatAmountForCode(vatRateGroups, "I21"),
+                      )}
+                      inputMode="decimal"
+                      placeholder="0 o 1234,56"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="vatAmount105" className="text-sm font-medium">
+                      IVA 10,5%
+                    </label>
+                    <Input
+                      id="vatAmount105"
+                      name="vatAmount105"
+                      defaultValue={amountInputDefault(
+                        getVatAmountForCode(vatRateGroups, "I10"),
+                      )}
+                      inputMode="decimal"
+                      placeholder="0 o 1234,56"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <label htmlFor="vatAmount" className="text-sm font-medium">
+                    IVA
+                  </label>
+                  <Input
+                    id="vatAmount"
+                    name="vatAmount"
+                    defaultValue={amountInputDefault(invoice.vatAmount)}
+                    inputMode="decimal"
+                    placeholder="0 o 1234,56"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <label htmlFor="perceptionsAmount" className="text-sm font-medium">
                   Percepciones
@@ -406,6 +470,21 @@ export function InvoiceExtractedFields({
                   inputMode="decimal"
                   placeholder="0 o 1234,56"
                 />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="discountAmount" className="text-sm font-medium">
+                  Bonificación
+                </label>
+                <Input
+                  id="discountAmount"
+                  name="discountAmount"
+                  defaultValue={amountInputDefault(discountBreakdown.discountAmount)}
+                  inputMode="decimal"
+                  placeholder="0 o 1234,56"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bonificaciones globales del comprobante. Dejá vacío si no aplica.
+                </p>
               </div>
               <div className="space-y-2">
                 <label htmlFor="totalAmount" className="text-sm font-medium">
@@ -574,14 +653,37 @@ export function InvoiceExtractedFields({
               <dt className="text-sm font-medium text-muted-foreground">Neto</dt>
               <dd className="text-sm">{formatMoney(invoice.netAmount)}</dd>
             </div>
-            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
-              <dt className="text-sm font-medium text-muted-foreground">IVA</dt>
-              <dd className="text-sm">{formatMoney(invoice.vatAmount)}</dd>
-            </div>
+            {vatRateGroups.length > 0 ? (
+              vatRateGroups.map((group) => (
+                <div
+                  key={group.gravCode}
+                  className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5"
+                >
+                  <dt className="text-sm font-medium text-muted-foreground">
+                    {group.label}
+                  </dt>
+                  <dd className="text-sm">{formatMoney(group.vatAmount)}</dd>
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">IVA</dt>
+                <dd className="text-sm">{formatMoney(invoice.vatAmount)}</dd>
+              </div>
+            )}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Percepciones</dt>
               <dd className="text-sm">{formatMoney(invoice.perceptionsAmount)}</dd>
             </div>
+            {discountBreakdown.discountAmount != null &&
+            discountBreakdown.discountAmount > 0 ? (
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">Bonificación</dt>
+                <dd className="text-sm">
+                  {formatMoney(discountBreakdown.discountAmount)}
+                </dd>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Total</dt>
               <dd className="text-sm font-medium">{formatMoney(invoice.totalAmount)}</dd>

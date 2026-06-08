@@ -118,6 +118,75 @@ export function tryFixPerceptionsOnly(fields: AmountFields): AmountFields | null
   return fixed;
 }
 
+function scoreReconcilingCandidate(
+  fields: AmountFields,
+  supplement?: AmountFields | null,
+): number {
+  const net = fields.net ?? Number.POSITIVE_INFINITY;
+  let score = net;
+
+  if (
+    fields.net != null &&
+    fields.total != null &&
+    fields.net > fields.total
+  ) {
+    score += 1e15;
+  }
+
+  if (
+    supplement?.net != null &&
+    fields.net != null &&
+    Math.abs(fields.net - supplement.net) <= 0.01
+  ) {
+    score -= 1e12;
+  }
+  if (
+    supplement?.total != null &&
+    fields.total != null &&
+    Math.abs(fields.total - supplement.total) <= 0.01
+  ) {
+    score -= 1e11;
+  }
+
+  return score;
+}
+
+function collectReconcilingCandidates(
+  nets: number[],
+  vats: number[],
+  percs: number[],
+  totals: number[],
+): AmountFields[] {
+  const candidates: AmountFields[] = [];
+  const seen = new Set<string>();
+
+  const push = (fields: AmountFields) => {
+    if (!reconcileAmounts(fields).reconciled) return;
+    const key = [fields.net, fields.vat, fields.perceptions, fields.total].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(fields);
+  };
+
+  for (const total of totals) {
+    for (const net of nets) {
+      for (const vat of vats) {
+        for (const perc of percs) {
+          push({ net, vat, perceptions: perc, total });
+        }
+      }
+    }
+    for (const net of nets) {
+      for (const vat of vats) {
+        const perc = roundMoney(total - net - vat);
+        if (perc >= 0) push({ net, vat, perceptions: perc, total });
+      }
+    }
+  }
+
+  return candidates;
+}
+
 /**
  * Cuando neto e IVA son coherentes (p. ej. IVA 21% del neto), ancla esos valores
  * y recalcula percepciones + total a partir del mejor candidato de total leído.
@@ -214,11 +283,13 @@ function uniqueAmountCandidates(
 }
 
 /**
- * Combina candidatos de 1ra y 2da pasada (y despejes algebraicos) buscando el set que cierra.
+ * Combina candidatos de 1ra y 2da pasada (solo valores leídos; percepciones derivables)
+ * buscando el set que cierra.
  */
 export function pickBestReconcilingFields(
   ...fieldSets: AmountFields[]
 ): AmountFields | null {
+  const supplement = fieldSets.length > 1 ? fieldSets[1] : null;
   const nets = uniqueAmountCandidates(fieldSets.map((f) => f.net));
   const vats = uniqueAmountCandidates(fieldSets.map((f) => f.vat));
   const percs = uniqueAmountCandidates(fieldSets.map((f) => f.perceptions));
@@ -226,66 +297,13 @@ export function pickBestReconcilingFields(
 
   if (totals.length === 0) return null;
 
-  for (const total of totals) {
-    for (const net of nets) {
-      for (const vat of vats) {
-        for (const perc of percs) {
-          const fields: AmountFields = {
-            net,
-            vat,
-            perceptions: perc,
-            total,
-          };
-          if (reconcileAmounts(fields).reconciled) return fields;
-        }
-      }
-    }
-  }
+  const candidates = collectReconcilingCandidates(nets, vats, percs, totals);
+  if (candidates.length === 0) return null;
 
-  for (const total of totals) {
-    for (const net of nets) {
-      for (const vat of vats) {
-        const perc = roundMoney(total - net - vat);
-        if (perc >= 0) {
-          const fields: AmountFields = {
-            net,
-            vat,
-            perceptions: perc,
-            total,
-          };
-          if (reconcileAmounts(fields).reconciled) return fields;
-        }
-      }
-    }
-    for (const net of nets) {
-      for (const perc of percs) {
-        const vat = roundMoney(total - net - perc);
-        if (vat >= 0) {
-          const fields: AmountFields = {
-            net,
-            vat,
-            perceptions: perc,
-            total,
-          };
-          if (reconcileAmounts(fields).reconciled) return fields;
-        }
-      }
-    }
-    for (const vat of vats) {
-      for (const perc of percs) {
-        const net = roundMoney(total - vat - perc);
-        if (net >= 0) {
-          const fields: AmountFields = {
-            net,
-            vat,
-            perceptions: perc,
-            total,
-          };
-          if (reconcileAmounts(fields).reconciled) return fields;
-        }
-      }
-    }
-  }
-
-  return null;
+  candidates.sort(
+    (a, b) =>
+      scoreReconcilingCandidate(a, supplement) -
+      scoreReconcilingCandidate(b, supplement),
+  );
+  return candidates[0] ?? null;
 }

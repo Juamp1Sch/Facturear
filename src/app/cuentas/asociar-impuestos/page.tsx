@@ -27,7 +27,7 @@ export default async function AsociarImpuestosPage() {
   const data = await getTaxChartAssociationFormData();
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
+    <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 pt-8 pb-48">
       <CuentasShell>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Vinculá la cuenta del plan para IVA y una o más cuentas para percepciones. En el JSON

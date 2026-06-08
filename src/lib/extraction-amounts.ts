@@ -1,5 +1,13 @@
-import { supplementAmountsFromImages } from "@/lib/ai";
-import { cropTotalsRegions, type VisionImage } from "@/lib/image-preprocess";
+import {
+  supplementAmountsFromImages,
+  supplementDiscountFromImages,
+} from "@/lib/ai";
+import {
+  cropDiscountHeuristicRegions,
+  cropDiscountRegions,
+  cropTotalsRegions,
+  type VisionImage,
+} from "@/lib/image-preprocess";
 import {
   pickBestReconcilingFields,
   reconcileAmounts,
@@ -8,8 +16,14 @@ import {
   vatConsistentWithNet,
   type AmountFields,
 } from "@/lib/amount-reconcile";
-import type { AmountsSupplement, InvoiceExtraction } from "@/lib/schemas";
-import { sumTaxLines } from "@/lib/tax-breakdown";
+import { hasJeluzLayoutDiscountSignal } from "@/lib/discount-breakdown";
+import type {
+  AmountsSupplement,
+  DiscountSupplement,
+  InvoiceExtraction,
+  TaxBreakdownLine,
+} from "@/lib/schemas";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 export type FinalizedAmounts = {
   netAmount: number | null;
@@ -19,7 +33,7 @@ export type FinalizedAmounts = {
   amountsReconciled: boolean;
   amountsDiscrepancy: number | null;
   amountsAlgebraicallyDerived: boolean;
-  correctedField: ("perceptions" | "total")[] | null;
+  correctedField: ("net" | "perceptions" | "total")[] | null;
   extracted: InvoiceExtraction;
 };
 
@@ -49,6 +63,33 @@ function resolveSupplementFields(supplement: AmountsSupplement): AmountFields {
   };
 }
 
+/**
+ * Reconcilia las líneas de percepción con el total corregido, preservando las
+ * etiquetas (IIBB / IVA) que definen el tipoImpuesto contable (PIB / PIV).
+ * - 0 líneas → null.
+ * - 1 línea → conserva el label y reajusta el monto al total corregido.
+ * - >1 líneas → si la suma sigue coincidiendo, las mantiene; si no, no puede
+ *   redistribuir sin perder precisión y devuelve null.
+ */
+function reconcilePerceptionLines(
+  lines: InvoiceExtraction["perception_lines"],
+  correctedPerceptions: number | null,
+): InvoiceExtraction["perception_lines"] {
+  const positive = lines?.filter((l) => l.amount > 0) ?? [];
+  if (positive.length === 0) return null;
+  if (correctedPerceptions == null || correctedPerceptions <= 0) return null;
+
+  if (positive.length === 1) {
+    return [{ ...positive[0]!, amount: correctedPerceptions }];
+  }
+
+  const sum = roundMoney(positive.reduce((acc, l) => acc + l.amount, 0));
+  if (Math.abs(sum - roundMoney(correctedPerceptions)) <= 0.01) {
+    return positive;
+  }
+  return null;
+}
+
 function applyAmountFieldsToExtraction(
   extracted: InvoiceExtraction,
   fields: AmountFields,
@@ -60,8 +101,9 @@ function applyAmountFieldsToExtraction(
     vat_amount: fields.vat,
     perceptions_amount: fields.perceptions,
     total_amount: fields.total,
-    perception_lines:
-      options?.clearPerceptionLines ? null : extracted.perception_lines,
+    perception_lines: options?.clearPerceptionLines
+      ? reconcilePerceptionLines(extracted.perception_lines, fields.perceptions)
+      : extracted.perception_lines,
   };
 }
 
@@ -80,8 +122,15 @@ function fieldsMatchRead(
 function detectCorrectedFields(
   before: AmountFields,
   after: AmountFields,
-): ("perceptions" | "total")[] {
-  const corrected: ("perceptions" | "total")[] = [];
+): ("net" | "perceptions" | "total")[] {
+  const corrected: ("net" | "perceptions" | "total")[] = [];
+  if (
+    before.net != null &&
+    after.net != null &&
+    before.net !== after.net
+  ) {
+    corrected.push("net");
+  }
   if (
     before.perceptions != null &&
     after.perceptions != null &&
@@ -191,6 +240,40 @@ export async function fetchAmountsSupplementCropped(
   return supplementAmountsFromImages(croppedImages);
 }
 
+/**
+ * Recorte del bloque BONIFICACION → lee solo porcentajes → importes con neto + % secuenciales.
+ * Layout Jeluz: recorte heurístico; resto: bandas verticales amplias del pie.
+ */
+export type FetchDiscountSupplementOptions = {
+  rawOcrText?: string | null;
+  providerName?: string | null;
+  discountLines?: TaxBreakdownLine[] | null;
+};
+
+export async function fetchDiscountSupplementCropped(
+  visionImages: VisionImage[],
+  options?: FetchDiscountSupplementOptions,
+): Promise<DiscountSupplement | null> {
+  if (visionImages.length === 0) return null;
+
+  const useJeluzHeuristic = hasJeluzLayoutDiscountSignal({
+    rawOcrText: options?.rawOcrText,
+    providerName: options?.providerName,
+    discountLines: options?.discountLines,
+  });
+
+  if (useJeluzHeuristic) {
+    const heuristicCrops = await cropDiscountHeuristicRegions(visionImages);
+    if (heuristicCrops.length > 0) {
+      const fromHeuristic = await supplementDiscountFromImages(heuristicCrops);
+      if (fromHeuristic?.discount_lines?.length) return fromHeuristic;
+    }
+  }
+
+  const discountCrops = await cropDiscountRegions(visionImages);
+  return supplementDiscountFromImages(discountCrops);
+}
+
 export type FinalizeExtractedAmountsOptions = {
   /** Si ya se obtuvo en paralelo con enrich fiscal, evita una 2da llamada. */
   precomputedSupplement?: AmountsSupplement | null;
@@ -209,7 +292,7 @@ export async function finalizeExtractedAmounts(
   let fields = primaryFields;
   let reconcile = reconcileAmounts(fields);
   let algebraicallyDerived = false;
-  let correctedField: ("perceptions" | "total")[] | null = null;
+  let correctedField: ("net" | "perceptions" | "total")[] | null = null;
   let needsReview = false;
 
   let supplement: AmountsSupplement | null =
