@@ -1,11 +1,12 @@
 "use client";
 
-import { Pencil, X } from "lucide-react";
+import { Pencil, RefreshCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  reprocessInvoice,
   setInvoiceEmpresaSucursal,
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
@@ -38,6 +39,7 @@ import {
   parseFiscalDocumentClass,
 } from "@/lib/document-class";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
+import { cn } from "@/lib/utils";
 
 function effectiveDocumentKind(invoice: SerializedInvoiceDetail): DocumentKind {
   if (isPresupuestoKind(invoice.documentKind)) return "PRESUPUESTO";
@@ -114,6 +116,7 @@ export function InvoiceExtractedFields({
     invoiceProp.sucursal ?? "",
   );
   const [assocSaving, setAssocSaving] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
 
   useEffect(() => {
     setDisplayInvoice(invoiceProp);
@@ -190,6 +193,29 @@ export function InvoiceExtractedFields({
     setError(null);
   }, []);
 
+  const handleReprocess = useCallback(async () => {
+    const confirmed = window.confirm(
+      "¿Reprocesar esta factura? Se volverá a ejecutar la extracción con IA y se sobrescribirán los datos extraídos, incluidas las correcciones manuales.",
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setReprocessing(true);
+    try {
+      const res = await reprocessInvoice(invoice.id);
+      if (res.ok) {
+        setDisplayInvoice(res.invoice);
+        onInvoiceUpdated?.(res.invoice);
+        setEditing(false);
+        router.refresh();
+      } else {
+        setError(res.error);
+      }
+    } finally {
+      setReprocessing(false);
+    }
+  }, [invoice.id, onInvoiceUpdated, router]);
+
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
@@ -221,16 +247,32 @@ export function InvoiceExtractedFields({
           </CardDescription>
         </div>
         {canEdit && !editing ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5"
-            onClick={openEdit}
-          >
-            <Pencil className="size-3.5" />
-            Editar
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleReprocess}
+              disabled={reprocessing}
+            >
+              <RefreshCw
+                className={cn("size-3.5", reprocessing && "animate-spin")}
+              />
+              {reprocessing ? "Reprocesando…" : "Reprocesar"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={openEdit}
+              disabled={reprocessing}
+            >
+              <Pencil className="size-3.5" />
+              Editar
+            </Button>
+          </div>
         ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
