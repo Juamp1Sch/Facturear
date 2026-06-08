@@ -14,8 +14,8 @@ import {
 } from "@/lib/ai";
 import {
   enrichExtractedDiscounts,
+  hasAnyDiscountSignal,
   logDiscountResolution,
-  syncDiscountPayloadAfterNetChange,
 } from "@/lib/discount-breakdown";
 import {
   fetchAmountsSupplementCropped,
@@ -73,10 +73,14 @@ import { uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
-/** Una factura a la vez por defecto: cada una hace 1–2 llamadas vision (alto TPM). */
+/**
+ * Facturas procesadas en paralelo. En Tier 1 de OpenAI (gpt-4o = 30.000 TPM) el cuello
+ * de botella es el TPM, no el RPM: con 2 alcanza y más solo gatilla 429 + backoff.
+ * Al pasar a Tier 2 (~450.000 TPM) conviene subir a 4-5 vía BATCH_CONCURRENCY en .env.
+ */
 const BATCH_CONCURRENCY = Math.max(
   1,
-  Number(process.env.BATCH_CONCURRENCY ?? "1") || 1,
+  Number(process.env.BATCH_CONCURRENCY ?? "2") || 2,
 );
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
@@ -249,19 +253,29 @@ async function extractFromParts(
   }
 
   const preprocessedImages = await preprocessVisionImages(visionImages);
-  const extracted = await extractInvoiceDataFromImages(preprocessedImages, extractOpts);
+  // La relectura de totales no depende de la extracción principal: corren en paralelo.
+  const [extracted, amountsSupplement] = await Promise.all([
+    extractInvoiceDataFromImages(preprocessedImages, extractOpts),
+    fetchAmountsSupplementCropped(preprocessedImages),
+  ]);
   const rawOcrText =
     ocrNotes.length > 0
       ? `${ocrNotes.join("\n\n")}\n\n[Campos inferidos por visión en ${parts.length} parte(s).]`
       : `[${parts.length} parte(s): campos inferidos por visión.]`;
   const footerImages = pickFooterVisionImages(preprocessedImages);
-  const [enriched, amountsSupplement, discountSupplement] = await Promise.all([
+  const wantDiscount = hasAnyDiscountSignal({ extracted, rawOcrText });
+  const [enriched, discountSupplement] = await Promise.all([
     enrichExtractionFiscalAuth(extracted, {
       rawOcrText,
       visionImages: footerImages,
     }),
-    fetchAmountsSupplementCropped(preprocessedImages),
-    fetchDiscountSupplementCropped(preprocessedImages),
+    wantDiscount
+      ? fetchDiscountSupplementCropped(preprocessedImages, {
+          rawOcrText,
+          providerName: extracted.provider,
+          discountLines: extracted.discount_lines,
+        })
+      : Promise.resolve(null),
   ]);
   return {
     extracted: enriched,
@@ -660,13 +674,20 @@ export async function uploadInvoice(formData: FormData) {
     let discountSupplement: DiscountSupplement | null = null;
     if (visionImages?.length) {
       const footerImages = pickFooterVisionImages(visionImages);
+      const wantDiscount = hasAnyDiscountSignal({ extracted, rawOcrText });
       const [enriched, supplement, discountSupp] = await Promise.all([
         enrichExtractionFiscalAuth(extracted, {
           rawOcrText,
           visionImages: footerImages,
         }),
         fetchAmountsSupplementCropped(visionImages),
-        fetchDiscountSupplementCropped(visionImages),
+        wantDiscount
+          ? fetchDiscountSupplementCropped(visionImages, {
+              rawOcrText,
+              providerName: extracted.provider,
+              discountLines: extracted.discount_lines,
+            })
+          : Promise.resolve(null),
       ]);
       extracted = enriched;
       amountsSupplement = supplement;
@@ -1121,19 +1142,6 @@ export async function updateInvoiceExtractedFields(
   }
   if (totalAmount != null) nextPayload.total_amount = Number(totalAmount);
   else delete nextPayload.total_amount;
-
-  const previousNet =
-    existing.netAmount != null
-      ? Number(existing.netAmount)
-      : typeof existingPayload.net_amount === "number"
-        ? existingPayload.net_amount
-        : null;
-  syncDiscountPayloadAfterNetChange(
-    existingPayload,
-    nextPayload,
-    previousNet,
-    netAmount != null ? Number(netAmount) : null,
-  );
 
   await prisma.invoice.update({
     where: { id: invoiceId },

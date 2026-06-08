@@ -16,7 +16,13 @@ import {
   vatConsistentWithNet,
   type AmountFields,
 } from "@/lib/amount-reconcile";
-import type { AmountsSupplement, DiscountSupplement, InvoiceExtraction } from "@/lib/schemas";
+import { hasJeluzLayoutDiscountSignal } from "@/lib/discount-breakdown";
+import type {
+  AmountsSupplement,
+  DiscountSupplement,
+  InvoiceExtraction,
+  TaxBreakdownLine,
+} from "@/lib/schemas";
 import { sumTaxLines } from "@/lib/tax-lines";
 
 export type FinalizedAmounts = {
@@ -27,7 +33,7 @@ export type FinalizedAmounts = {
   amountsReconciled: boolean;
   amountsDiscrepancy: number | null;
   amountsAlgebraicallyDerived: boolean;
-  correctedField: ("perceptions" | "total")[] | null;
+  correctedField: ("net" | "perceptions" | "total")[] | null;
   extracted: InvoiceExtraction;
 };
 
@@ -116,8 +122,15 @@ function fieldsMatchRead(
 function detectCorrectedFields(
   before: AmountFields,
   after: AmountFields,
-): ("perceptions" | "total")[] {
-  const corrected: ("perceptions" | "total")[] = [];
+): ("net" | "perceptions" | "total")[] {
+  const corrected: ("net" | "perceptions" | "total")[] = [];
+  if (
+    before.net != null &&
+    after.net != null &&
+    before.net !== after.net
+  ) {
+    corrected.push("net");
+  }
   if (
     before.perceptions != null &&
     after.perceptions != null &&
@@ -228,18 +241,33 @@ export async function fetchAmountsSupplementCropped(
 }
 
 /**
- * Recorte heurístico del bloque BONIFICACION → lee solo porcentajes → importes se calculan
- * con el neto gravado y descuentos secuenciales (más preciso que OCR de 7 dígitos).
+ * Recorte del bloque BONIFICACION → lee solo porcentajes → importes con neto + % secuenciales.
+ * Layout Jeluz: recorte heurístico; resto: bandas verticales amplias del pie.
  */
+export type FetchDiscountSupplementOptions = {
+  rawOcrText?: string | null;
+  providerName?: string | null;
+  discountLines?: TaxBreakdownLine[] | null;
+};
+
 export async function fetchDiscountSupplementCropped(
   visionImages: VisionImage[],
+  options?: FetchDiscountSupplementOptions,
 ): Promise<DiscountSupplement | null> {
   if (visionImages.length === 0) return null;
 
-  const heuristicCrops = await cropDiscountHeuristicRegions(visionImages);
-  if (heuristicCrops.length > 0) {
-    const fromHeuristic = await supplementDiscountFromImages(heuristicCrops);
-    if (fromHeuristic?.discount_lines?.length) return fromHeuristic;
+  const useJeluzHeuristic = hasJeluzLayoutDiscountSignal({
+    rawOcrText: options?.rawOcrText,
+    providerName: options?.providerName,
+    discountLines: options?.discountLines,
+  });
+
+  if (useJeluzHeuristic) {
+    const heuristicCrops = await cropDiscountHeuristicRegions(visionImages);
+    if (heuristicCrops.length > 0) {
+      const fromHeuristic = await supplementDiscountFromImages(heuristicCrops);
+      if (fromHeuristic?.discount_lines?.length) return fromHeuristic;
+    }
   }
 
   const discountCrops = await cropDiscountRegions(visionImages);
@@ -264,7 +292,7 @@ export async function finalizeExtractedAmounts(
   let fields = primaryFields;
   let reconcile = reconcileAmounts(fields);
   let algebraicallyDerived = false;
-  let correctedField: ("perceptions" | "total")[] | null = null;
+  let correctedField: ("net" | "perceptions" | "total")[] | null = null;
   let needsReview = false;
 
   let supplement: AmountsSupplement | null =

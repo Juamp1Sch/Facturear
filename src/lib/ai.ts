@@ -22,8 +22,11 @@ export type InvoiceExtractOptions = {
 
 const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
   • Formato argentino impreso: miles con PUNTO, decimales con COMA (ej. "1.227,55" = 1227.55; "61,38" = 61.38). Ignorá el prefijo "USD", "$" o "ARS" y devolvé el número decimal interno (1227.55).
-  • Leé el RECUADRO DE TOTALES del pie de factura (típicamente abajo a la derecha): Subtotal/Neto, Total IVA, Total Percep./Percepciones, Total.
-  • ANTES de responder, verificá que net_amount + vat_amount + perceptions_amount ≈ total_amount (tolerancia centavos). Si NO cierra, RELEÉ dígito por dígito cada importe del recuadro de totales; no inventes ni redondees de más.
+  • Leé el RECUADRO DE TOTALES del pie de factura (típicamente abajo a la derecha): Subtotal/Neto gravado, Total IVA, Total Percep./Percepciones, Total final.
+  • net_amount = importe ANTES de IVA y percepciones (suele decir "Subtotal", "Neto gravado", "Importe neto"). Es el importe base, normalmente el MENOR del recuadro. NO uses filas rotuladas "TOTAL NETO", "Total a pagar" ni el total final como net_amount sin verificar.
+  • total_amount = importe FINAL del comprobante (= Subtotal + IVA + percepciones). Algunos comprobantes rotulan mal el total final como "TOTAL NETO" o "Neto": si ese número = Subtotal + IVA + percepciones, es total_amount, NO net_amount; suele ser el MAYOR del recuadro.
+  • Devolvé SIEMPRE net_amount y total_amount por separado si ambos aparecen en el recuadro, aunque tengan rótulos parecidos ("Neto", "TOTAL NETO", "Total").
+  • ANTES de responder, verificá que net_amount + vat_amount + perceptions_amount ≈ total_amount (tolerancia centavos). Si NO cierra, RELEÉ: el neto gravado suele ser el MENOR importe base del recuadro (Subtotal); el total final el MAYOR que cierra la suma.
   • Si hay caja "Saldo en cuenta" o desglose lateral (abajo a la izquierda) con "Perc IIBB", usala para validar el Total Percep. IIBB del recuadro derecho; si difieren, releé ambos.
   • Dígitos similares: prestá atención a 1/7, 2/3, 4/6, 5/8, 0/8. Si un dígito es ambiguo, preferí el valor que hace cerrar la suma con el Total impreso.
   • Si hay varios totales, elegí el total final a pagar del recuadro principal de totales.
@@ -274,11 +277,12 @@ export async function extractInvoiceDataFromImages(
 const AMOUNTS_SUPPLEMENT_VISION_PROMPT = `Sos un asistente contable para Argentina. La imagen es un RECORTE AMPLIADO de la franja inferior del comprobante (recuadro de totales a la derecha y, si aparece, caja "Saldo en cuenta" / desglose a la izquierda).
 
 Buscá y devolvé SOLO estos importes:
-- net_amount: "Subtotal", "Neto gravado", "Importe neto" (recuadro derecho, sin IVA ni percepciones).
-- vat_amount: "Total IVA", "IVA 21%", suma de IVA.
+- net_amount: "Subtotal", "Neto gravado", "Importe neto" — importe SIN IVA ni percepciones (suele ser la fila base más chica del recuadro). NO confundas con "TOTAL NETO" ni "Neto" del pie si ese valor = Subtotal + IVA + percepciones (en ese caso es total_amount, no net_amount).
+- vat_amount: "Total IVA", suma de renglones IVA 21% / 10,5%.
 - perceptions_amount: "Total Percep. IIBB" / "Percepciones IIBB" del RECUADRO DERECHO de totales.
 - perceptions_amount_secondary: "Perc IIBB" / percepción IIBB en la caja "Saldo en cuenta" o desglose INFERIOR IZQUIERDO (si está visible). Debe coincidir con perceptions_amount; si leés valores distintos, devolvé ambos.
-- total_amount: "Total" final a pagar (fila más abajo del recuadro derecho). Releé dígito por dígito (6 vs 4: 1.546,72 vs 1.544,72).
+- total_amount: total FINAL a pagar (Subtotal + IVA + percepciones). Puede figurar como "Total", "TOTAL NETO" o "Neto" en el pie — verificá que sea la suma, no el Subtotal.
+- Devolvé SIEMPRE net_amount y total_amount por separado si ambos están visibles, aunque el rótulo del total diga "TOTAL NETO" o "Neto".
 
 Reglas CRÍTICAS:
 - Formato argentino: miles con punto, decimales con coma (1.227,55 → 1227.55). Ignorá "USD" o "$".
@@ -300,7 +304,7 @@ export async function supplementAmountsFromImages(
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     {
       type: "text",
-      text: "Esta imagen es un recorte ampliado del pie de la factura. Leé Subtotal, Total IVA, Total Percep. IIBB (derecha), Perc IIBB en Saldo en cuenta (izquierda, si aparece) y Total final. Cruzá ambas percepciones; deben coincidir. Releé Total y Percepciones dígito por dígito (6 vs 4).",
+      text: "Esta imagen es un recorte ampliado del pie de la factura. Leé Subtotal (neto gravado), IVA, Percepciones y total FINAL. Si una fila dice TOTAL NETO o Neto pero su valor = Subtotal + IVA + percepciones, es el total final, no el subtotal. Cruzá percepciones izquierda/derecha. Releé dígitos (6 vs 4).",
     },
     ...images.map((img) => ({
       type: "image_url" as const,
