@@ -1040,6 +1040,7 @@ export async function updateInvoiceExtractedFields(
   let netAmount: Prisma.Decimal | null;
   let vatAmount: Prisma.Decimal | null;
   let perceptionsAmount: Prisma.Decimal | null;
+  let discountAmount: Prisma.Decimal | null;
   let totalAmount: Prisma.Decimal | null;
   const vatBreakdownDiscriminated =
     formData.get("vatBreakdownDiscriminated") === "1";
@@ -1059,6 +1060,7 @@ export async function updateInvoiceExtractedFields(
       vatAmount = parseMoneyFromForm(formData.get("vatAmount"));
     }
     perceptionsAmount = parseMoneyFromForm(formData.get("perceptionsAmount"));
+    discountAmount = parseMoneyFromForm(formData.get("discountAmount"));
     totalAmount = parseMoneyFromForm(formData.get("totalAmount"));
   } catch (e) {
     if (e instanceof Error && e.message === "MONTO_INVALIDO") {
@@ -1142,6 +1144,16 @@ export async function updateInvoiceExtractedFields(
   }
   if (totalAmount != null) nextPayload.total_amount = Number(totalAmount);
   else delete nextPayload.total_amount;
+  const discountNum = discountAmount != null ? Number(discountAmount) : null;
+  if (discountNum != null && discountNum > 0) {
+    nextPayload.discount_amount = discountNum;
+    nextPayload.discount_lines = [{ label: "Bonificación", amount: discountNum }];
+    delete nextPayload.discount_resolution;
+  } else {
+    delete nextPayload.discount_amount;
+    delete nextPayload.discount_lines;
+    delete nextPayload.discount_resolution;
+  }
 
   await prisma.invoice.update({
     where: { id: invoiceId },

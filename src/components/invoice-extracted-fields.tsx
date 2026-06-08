@@ -472,6 +472,21 @@ export function InvoiceExtractedFields({
                 />
               </div>
               <div className="space-y-2">
+                <label htmlFor="discountAmount" className="text-sm font-medium">
+                  Bonificación
+                </label>
+                <Input
+                  id="discountAmount"
+                  name="discountAmount"
+                  defaultValue={amountInputDefault(discountBreakdown.discountAmount)}
+                  inputMode="decimal"
+                  placeholder="0 o 1234,56"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bonificaciones globales del comprobante. Dejá vacío si no aplica.
+                </p>
+              </div>
+              <div className="space-y-2">
                 <label htmlFor="totalAmount" className="text-sm font-medium">
                   Total
                 </label>

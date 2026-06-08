@@ -497,25 +497,22 @@ export function logDiscountResolution(
   context: string,
   debug: DiscountResolutionDebug | null,
 ): void {
-  if (!debug) return;
-  const payload = {
-    context,
-    chosenSource: debug.chosenSource,
-    lineCount: debug.merged.length,
-    total: debug.total,
-    sources: {
-      ia: debug.sources.ia.length,
-      supplement: debug.sources.supplement.length,
-      ocr: debug.sources.ocr.length,
-      computed: debug.sources.computed.length,
-    },
-    merged: debug.merged.map((line) => ({
-      label: line.label,
-      amount: line.amount,
-      sources: line.sources.map(formatDiscountSource),
-    })),
-  };
-  console.info("[discount-resolution]", JSON.stringify(payload, null, 2));
+  if (!debug || process.env.NODE_ENV !== "development") return;
+  // Resumen sin importes ni labels: evita datos sensibles en logs serverless.
+  console.info(
+    "[discount-resolution]",
+    JSON.stringify({
+      context,
+      chosenSource: debug.chosenSource,
+      lineCount: debug.merged.length,
+      sources: {
+        ia: debug.sources.ia.length,
+        supplement: debug.sources.supplement.length,
+        ocr: debug.sources.ocr.length,
+        computed: debug.sources.computed.length,
+      },
+    }),
+  );
 }
 
 /** Resuelve bonificaciones al leer aiPayload, complementando con OCR si hay más renglones. */
