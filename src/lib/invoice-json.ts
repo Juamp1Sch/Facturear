@@ -8,6 +8,7 @@ import {
   groupVatLinesByRate,
 } from "@/lib/vat-rate";
 import type { SerializedChartAccount } from "@/types/invoice";
+import { isUsdTipoMoneda } from "@/lib/tipo-moneda";
 
 /** tipoImpuesto contable para presupuestos (no gravado). */
 export const PRESUPUESTO_TIPO_IMPUESTO = "NGR";
@@ -37,6 +38,7 @@ export type InvoiceJsonShape = {
   fechaFactura: string | null;
   codigoComprobante: string | null;
   numeroComprobante: string | null;
+  tipoMoneda?: "usd";
 };
 
 function decimalToNumber(value: string | null | undefined): number | null {
@@ -303,6 +305,7 @@ export type InvoiceJsonSource = {
   vatChartAccountCode?: string | null;
   perceptionsAccounts?: PerceptionChartAccount[];
   bonificacionAccountCode?: string | null;
+  tipoMoneda?: string | null;
 };
 
 export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
@@ -310,7 +313,7 @@ export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
   const kind = parseDocumentKind(invoice.documentKind);
   const isPresupuesto = kind === "PRESUPUESTO";
 
-  return {
+  const base: InvoiceJsonShape = {
     id: invoice.movementId ?? "",
     empresa: invoice.empresa,
     contable: buildContableLines(
@@ -338,4 +341,10 @@ export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
     codigoComprobante: buildCodigoComprobante(invoice.invoiceType, kind),
     numeroComprobante: invoice.invoiceNumber,
   };
+
+  if (isUsdTipoMoneda(invoice.tipoMoneda)) {
+    base.tipoMoneda = "usd";
+  }
+
+  return base;
 }

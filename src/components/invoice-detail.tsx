@@ -112,6 +112,7 @@ export function InvoiceDetail({
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
     perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
     bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
+    tipoMoneda: invoice.tipoMoneda,
   });
 
   const uploadDisabledReason =

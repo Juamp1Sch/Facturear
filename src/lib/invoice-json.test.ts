@@ -90,4 +90,60 @@ describe("buildInvoiceJson IVA", () => {
     assert.equal(json.contable[0]!.tipoImpuesto, PRESUPUESTO_TIPO_IMPUESTO);
     assert.equal(json.contable[0]!.monto, 1210);
   });
+
+  it("no incluye tipoMoneda cuando la moneda es ARS o null", () => {
+    const json = buildInvoiceJson({
+      movementId: "M1",
+      empresa: "01",
+      sucursal: "01",
+      supplierCode: "P001",
+      invoiceDate: "2026-01-15",
+      invoiceType: "A",
+      documentKind: "FACTURA",
+      invoiceNumber: "0001-00000001",
+      netAmount: "1000",
+      vatAmount: "210",
+      vatLines: [{ label: "IVA 21%", amount: 210 }],
+      perceptionsAmount: null,
+      perceptionLines: null,
+      discountAmount: null,
+      discountLines: null,
+      totalAmount: "1210",
+      chartAccount: { id: "1", code: "411", name: "Compras", type: null },
+      vatChartAccountCode: "214",
+      perceptionsAccounts: [],
+      bonificacionAccountCode: null,
+      tipoMoneda: null,
+    });
+
+    assert.equal("tipoMoneda" in json, false);
+  });
+
+  it("incluye tipoMoneda usd cuando la moneda es USD", () => {
+    const json = buildInvoiceJson({
+      movementId: "M1",
+      empresa: "01",
+      sucursal: "01",
+      supplierCode: "P001",
+      invoiceDate: "2026-01-15",
+      invoiceType: "A",
+      documentKind: "FACTURA",
+      invoiceNumber: "0001-00000001",
+      netAmount: "1000",
+      vatAmount: "210",
+      vatLines: [{ label: "IVA 21%", amount: 210 }],
+      perceptionsAmount: null,
+      perceptionLines: null,
+      discountAmount: null,
+      discountLines: null,
+      totalAmount: "1210",
+      chartAccount: { id: "1", code: "411", name: "Compras", type: null },
+      vatChartAccountCode: "214",
+      perceptionsAccounts: [],
+      bonificacionAccountCode: null,
+      tipoMoneda: "usd",
+    });
+
+    assert.equal(json.tipoMoneda, "usd");
+  });
 });

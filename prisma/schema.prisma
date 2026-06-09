@@ -74,6 +74,7 @@ model Invoice {
   afipCode            String?            @map("afip_code")
   fiscalAuthType      String?            @map("fiscal_auth_type")
   fiscalAuthCode      String?            @map("fiscal_auth_code")
+  tipoMoneda          String?            @map("tipo_moneda")
   status              InvoiceStatus      @default(PROCESSING)
   aiConfidence        Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")
