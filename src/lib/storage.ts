@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "fs/promises";
+import { existsSync } from "fs";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 
 import {
@@ -175,6 +176,54 @@ export async function readStoredFile(key: string): Promise<{
     buffer: Buffer.from(row.data),
     contentType: row.contentType,
   };
+}
+
+function contentTypeForKey(key: string): string {
+  const lower = key.toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
+/** Lee un archivo de factura desde DB, S3 o disco local. */
+export async function readInvoiceFile(key: string): Promise<{
+  buffer: Buffer;
+  contentType: string;
+} | null> {
+  const fromDb = await readStoredFile(key);
+  if (fromDb) return fromDb;
+
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      const bucket = s3BucketName()!;
+      const resp = await client.send(
+        new GetObjectCommand({ Bucket: bucket, Key: key }),
+      );
+      const body = await resp.Body?.transformToByteArray();
+      if (!body) return null;
+      return {
+        buffer: Buffer.from(body),
+        contentType: resp.ContentType ?? contentTypeForKey(key),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const resolved = path.resolve(LOCAL_ROOT, key);
+  const rootResolved = path.resolve(LOCAL_ROOT);
+  if (
+    !resolved.startsWith(rootResolved + path.sep) &&
+    resolved !== rootResolved
+  ) {
+    return null;
+  }
+  if (!existsSync(resolved)) return null;
+
+  const buffer = await readFile(resolved);
+  return { buffer, contentType: contentTypeForKey(key) };
 }
 
 export async function getSignedReadUrl(key: string): Promise<string> {

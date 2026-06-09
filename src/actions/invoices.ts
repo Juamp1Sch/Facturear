@@ -69,7 +69,7 @@ import {
 } from "@/lib/document-class";
 import { rememberSupplierAlias } from "@/lib/supplier-alias";
 import { formatOpenAIExtractionError } from "@/lib/openai-retry";
-import { uploadBuffer } from "@/lib/storage";
+import { readInvoiceFile, uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
@@ -294,6 +294,10 @@ async function applyExtractionToInvoice(
   visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[],
   amountsSupplement?: AmountsSupplement | null,
   discountSupplement?: DiscountSupplement | null,
+  options?: {
+    preserveMovementId?: string | null;
+    resetDestinationUpload?: boolean;
+  },
 ): Promise<void> {
   const prior = await prisma.invoice.findFirst({
     where: { id: invoiceId },
@@ -323,7 +327,9 @@ async function applyExtractionToInvoice(
     (await resolveChartAccountForExtraction(userId, extracted.chart_account_code, null));
 
   const invoiceDate = parseAiInvoiceDate(extracted.invoice_date);
-  const movementId = await allocateUniqueMovementId(invoiceDate);
+  const movementId =
+    options?.preserveMovementId ??
+    (await allocateUniqueMovementId(invoiceDate));
   const doc = resolveDocumentClassification(extracted, rawOcrText);
   const documentKind = doc.documentKind;
   const documentClass = doc.documentClass;
@@ -404,6 +410,13 @@ async function applyExtractionToInvoice(
       aiConfidence: resolvedExtracted.confidence,
       aiPayload: aiPayloadOut as object,
       status: "READY",
+      ...(options?.resetDestinationUpload
+        ? {
+            destinationUploadedAt: null,
+            destinationUploadStatus: null,
+            destinationUploadBody: null,
+          }
+        : {}),
     },
   });
 }
@@ -1244,4 +1257,129 @@ export async function setInvoiceEmpresaSucursal(
   return { ok: true, invoice: updated };
 }
 
+export type ReprocessInvoiceResult =
+  | { ok: true; invoice: SerializedBatchInvoice }
+  | { ok: false; error: string };
+
+export async function reprocessInvoice(
+  invoiceId: string,
+): Promise<ReprocessInvoiceResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+  const userId = session.user.id;
+
+  const existing = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId },
+    include: { files: { orderBy: { partIndex: "asc" } } },
+  });
+  if (!existing) {
+    return { ok: false, error: "No se encontró la factura." };
+  }
+
+  const previousStatus = existing.status;
+  const previousAiPayload = existing.aiPayload;
+
+  const claimed = await prisma.invoice.updateMany({
+    where: {
+      id: invoiceId,
+      userId,
+      status: { not: "PROCESSING" },
+    },
+    data: { status: "PROCESSING" },
+  });
+  if (claimed.count === 0) {
+    return { ok: false, error: "La factura sigue procesándose." };
+  }
+
+  try {
+    const fileParts =
+      existing.files.length > 0
+        ? existing.files
+        : [
+            {
+              partIndex: 0,
+              fileKey: existing.originalFileKey,
+              fileUrl: existing.originalFileUrl,
+              mimeType: existing.mimeType,
+            },
+          ];
+
+    const uploadedParts: UploadedPart[] = [];
+    for (const part of fileParts) {
+      const stored = await readInvoiceFile(part.fileKey);
+      if (!stored) {
+        throw new Error(
+          `No se pudo leer el archivo: parte ${part.partIndex + 1}.`,
+        );
+      }
+      uploadedParts.push({
+        buffer: stored.buffer,
+        mimeType: part.mimeType,
+        key: part.fileKey,
+        publicUrl: part.fileUrl,
+      });
+    }
+
+    const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
+      loadSupplierMaestroCuitHintsBlock(userId),
+      loadChartAccountHintsBlock(userId),
+    ]);
+    const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
+
+    const {
+      extracted,
+      rawOcrText,
+      visionImages,
+      amountsSupplement,
+      discountSupplement,
+    } = await extractFromParts(uploadedParts, extractOpts);
+
+    await applyExtractionToInvoice(
+      invoiceId,
+      userId,
+      extracted,
+      rawOcrText,
+      visionImages,
+      amountsSupplement,
+      discountSupplement,
+      {
+        preserveMovementId: existing.movementId,
+        resetDestinationUpload: true,
+      },
+    );
+
+    const [updated] = await loadSerializedBatchInvoices(userId, [invoiceId]);
+    if (!updated) {
+      return { ok: false, error: "No se pudo cargar la factura actualizada." };
+    }
+
+    revalidatePath("/history");
+    revalidatePath("/proveedores");
+    revalidatePath("/upload");
+    revalidatePath(`/history/${invoiceId}`);
+    return { ok: true, invoice: updated };
+  } catch (e) {
+    const message = formatOpenAIExtractionError(e);
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: previousStatus,
+        aiPayload:
+          previousAiPayload == null
+            ? Prisma.JsonNull
+            : (previousAiPayload as Prisma.InputJsonValue),
+      },
+    });
+    revalidatePath("/history");
+    revalidatePath("/upload");
+    revalidatePath(`/history/${invoiceId}`);
+    return { ok: false, error: message };
+  }
+}
 
