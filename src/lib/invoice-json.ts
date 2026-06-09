@@ -8,6 +8,7 @@ import {
   groupVatLinesByRate,
 } from "@/lib/vat-rate";
 import type { SerializedChartAccount } from "@/types/invoice";
+import { isUsdTipoMoneda } from "@/lib/tipo-moneda";
 
 /** tipoImpuesto contable para presupuestos (no gravado). */
 export const PRESUPUESTO_TIPO_IMPUESTO = "NGR";
@@ -306,10 +307,6 @@ export type InvoiceJsonSource = {
   bonificacionAccountCode?: string | null;
   tipoMoneda?: string | null;
 };
-
-function isUsdTipoMoneda(value: string | null | undefined): boolean {
-  return value?.trim().toLowerCase() === "usd";
-}
 
 export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
   const mainCuentaCode = invoice.chartAccount?.code ?? null;

@@ -14,9 +14,9 @@ import {
 import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
 import {
   CurrencyToggle,
-  invoiceTipoMonedaToCurrency,
   type CurrencyValue,
 } from "@/components/currency-toggle";
+import { tipoMonedaToCurrencyValue } from "@/lib/tipo-moneda";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -210,7 +210,7 @@ export function InvoiceExtractedFields({
     [invoice.id, onInvoiceUpdated, router],
   );
 
-  const currencyValue = invoiceTipoMonedaToCurrency(invoice.tipoMoneda);
+  const currencyValue = tipoMonedaToCurrencyValue(invoice.tipoMoneda);
 
   const canEdit = invoice.status !== "PROCESSING";
 

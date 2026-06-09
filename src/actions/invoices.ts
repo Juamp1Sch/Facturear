@@ -54,6 +54,7 @@ import {
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
 import { prisma } from "@/lib/db";
+import { parseTipoMonedaForStorage } from "@/lib/tipo-moneda";
 import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
 import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
@@ -1284,8 +1285,7 @@ export async function setInvoiceTipoMoneda(
     return { ok: false, error: "La factura sigue procesándose." };
   }
 
-  const raw = (formText(formData.get("tipoMoneda")) ?? "").toLowerCase();
-  const tipoMoneda = raw === "usd" ? "usd" : null;
+  const tipoMoneda = parseTipoMonedaForStorage(formText(formData.get("tipoMoneda")));
 
   await prisma.invoice.update({
     where: { id: invoiceId },

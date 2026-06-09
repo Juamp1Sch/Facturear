@@ -1,8 +1,9 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import type { CurrencyValue } from "@/lib/tipo-moneda";
 
-export type CurrencyValue = "ars" | "usd";
+export type { CurrencyValue };
 
 const optionBase =
   "inline-flex h-6 shrink-0 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
@@ -55,10 +56,4 @@ export function CurrencyToggle({
       })}
     </div>
   );
-}
-
-export function invoiceTipoMonedaToCurrency(
-  tipoMoneda: string | null | undefined,
-): CurrencyValue {
-  return tipoMoneda?.trim().toLowerCase() === "usd" ? "usd" : "ars";
 }
