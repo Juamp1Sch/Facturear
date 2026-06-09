@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { FileText, History, Sparkles } from "lucide-react";
 
+import { LandingFaq } from "@/components/landing-faq";
 import { buttonVariants } from "@/components/ui/button";
+import { landingFaqJsonLd } from "@/lib/landing-faq-data";
 import { cn } from "@/lib/utils";
 
 export default function LandingPage() {
@@ -80,7 +82,7 @@ export default function LandingPage() {
         </ul>
       </section>
 
-      <section className="border-t border-border bg-muted/40 px-4 py-16">
+      <section className="border-y border-border bg-muted/40 px-4 py-16">
         <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-card p-8 text-center shadow-sm sm:p-10">
           <h2 className="mb-3 text-2xl font-semibold text-brand-subsection">
             Empezá gratis en minutos
@@ -94,6 +96,14 @@ export default function LandingPage() {
           </Link>
         </div>
       </section>
+
+      <LandingFaq />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(landingFaqJsonLd()),
+        }}
+      />
     </div>
   );
 }
