@@ -9,6 +9,9 @@ import {
 } from "@/lib/vat-rate";
 import type { SerializedChartAccount } from "@/types/invoice";
 
+/** tipoImpuesto contable para presupuestos (no gravado). */
+export const PRESUPUESTO_TIPO_IMPUESTO = "NGR";
+
 export type ContableLine = {
   monto: number;
   cuenta: string | null;
@@ -184,6 +187,37 @@ function buildBonificacionContableLines(
   ];
 }
 
+function buildPresupuestoContableLines(
+  netAmount: number | null,
+  totalAmount: number | null,
+  discountAmount: string | null,
+  discountLines: TaxBreakdownLine[] | null | undefined,
+  mainCuentaCode: string | null,
+  bonificacionAccountCode: string | null,
+): ContableLine[] {
+  const amount = totalAmount ?? netAmount;
+  const lines: ContableLine[] = [];
+
+  if (amount != null && amount > 0) {
+    lines.push({
+      monto: amount,
+      cuenta: mainCuentaCode,
+      centroCosto: null,
+      tipoImpuesto: PRESUPUESTO_TIPO_IMPUESTO,
+    });
+  }
+
+  lines.push(
+    ...buildBonificacionContableLines(
+      discountAmount,
+      discountLines,
+      bonificacionAccountCode,
+    ),
+  );
+
+  return lines;
+}
+
 function buildContableLines(
   netAmount: string | null,
   vatAmount: string | null,
@@ -197,9 +231,21 @@ function buildContableLines(
   vatCuentaCode: string | null,
   perceptionsAccounts: PerceptionChartAccount[],
   bonificacionAccountCode: string | null,
+  isPresupuesto: boolean,
 ): ContableLine[] {
   const net = decimalToNumber(netAmount);
   const total = decimalToNumber(totalAmount);
+
+  if (isPresupuesto) {
+    return buildPresupuestoContableLines(
+      net,
+      total,
+      discountAmount,
+      discountLines,
+      mainCuentaCode,
+      bonificacionAccountCode,
+    );
+  }
 
   const lines: ContableLine[] = [
     ...buildVatAndGravadoContableLines(
@@ -262,6 +308,7 @@ export type InvoiceJsonSource = {
 export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
   const mainCuentaCode = invoice.chartAccount?.code ?? null;
   const kind = parseDocumentKind(invoice.documentKind);
+  const isPresupuesto = kind === "PRESUPUESTO";
 
   return {
     id: invoice.movementId ?? "",
@@ -279,6 +326,7 @@ export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
       invoice.vatChartAccountCode ?? null,
       invoice.perceptionsAccounts ?? [],
       invoice.bonificacionAccountCode ?? null,
+      isPresupuesto,
     ),
     sucursal: invoice.sucursal,
     mercaderias: [],
