@@ -3,6 +3,7 @@ import { FileText, History, Sparkles } from "lucide-react";
 
 import { LandingFaq } from "@/components/landing-faq";
 import { buttonVariants } from "@/components/ui/button";
+import { landingFaqJsonLd } from "@/lib/landing-faq-data";
 import { cn } from "@/lib/utils";
 
 export default function LandingPage() {
@@ -97,6 +98,12 @@ export default function LandingPage() {
       </section>
 
       <LandingFaq />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(landingFaqJsonLd()),
+        }}
+      />
     </div>
   );
 }
