@@ -35,6 +35,7 @@ export type SerializedInvoiceListItem = {
   cuitSucursalOptions?: string[];
   documentKind: string | null;
   documentClass: string | null;
+  tipoMoneda: string | null;
   afipCode: string | null;
   fiscalAuthType: string | null;
   fiscalAuthCode: string | null;

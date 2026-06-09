@@ -8,9 +8,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   reprocessInvoice,
   setInvoiceEmpresaSucursal,
+  setInvoiceTipoMoneda,
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
 import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
+import {
+  CurrencyToggle,
+  invoiceTipoMonedaToCurrency,
+  type CurrencyValue,
+} from "@/components/currency-toggle";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -116,6 +122,7 @@ export function InvoiceExtractedFields({
     invoiceProp.sucursal ?? "",
   );
   const [assocSaving, setAssocSaving] = useState(false);
+  const [currencySaving, setCurrencySaving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
 
   useEffect(() => {
@@ -179,6 +186,31 @@ export function InvoiceExtractedFields({
     },
     [invoice.id, invoice.empresa, invoice.sucursal, onInvoiceUpdated, router],
   );
+
+  const persistTipoMoneda = useCallback(
+    async (next: CurrencyValue) => {
+      setError(null);
+      const fd = new FormData();
+      fd.append("invoiceId", invoice.id);
+      fd.append("tipoMoneda", next);
+      setCurrencySaving(true);
+      try {
+        const res = await setInvoiceTipoMoneda(fd);
+        if (res.ok) {
+          setDisplayInvoice(res.invoice);
+          onInvoiceUpdated?.(res.invoice);
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      } finally {
+        setCurrencySaving(false);
+      }
+    },
+    [invoice.id, onInvoiceUpdated, router],
+  );
+
+  const currencyValue = invoiceTipoMonedaToCurrency(invoice.tipoMoneda);
 
   const canEdit = invoice.status !== "PROCESSING";
 
@@ -420,6 +452,14 @@ export function InvoiceExtractedFields({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="space-y-2">
+                <span className="text-sm font-medium">Moneda</span>
+                <CurrencyToggle
+                  value={currencyValue}
+                  disabled={currencySaving}
+                  onSelect={persistTipoMoneda}
+                />
               </div>
               {draftDocumentKind !== "PRESUPUESTO" ? (
               <div className="space-y-2">
@@ -670,6 +710,16 @@ export function InvoiceExtractedFields({
                 >
                   {documentKindLabel(kindForDisplay)}
                 </span>
+              </dd>
+            </div>
+            <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+              <dt className="text-sm font-medium text-muted-foreground">Moneda</dt>
+              <dd className="text-sm">
+                <CurrencyToggle
+                  value={currencyValue}
+                  disabled={currencySaving}
+                  onSelect={persistTipoMoneda}
+                />
               </dd>
             </div>
             {!isPresupuesto ? (

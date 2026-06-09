@@ -103,6 +103,7 @@ export async function uploadInvoiceToDestination(
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
     perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
     bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
+    tipoMoneda: invoice.tipoMoneda,
   });
 
   if (!payload.fechaFactura) {

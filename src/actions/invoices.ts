@@ -1257,6 +1257,55 @@ export async function setInvoiceEmpresaSucursal(
   return { ok: true, invoice: updated };
 }
 
+export async function setInvoiceTipoMoneda(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  if (!invoiceId) {
+    return { ok: false, error: "Falta el identificador de la factura." };
+  }
+
+  const existing = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId: session.user.id },
+  });
+  if (!existing) {
+    return { ok: false, error: "No se encontró la factura." };
+  }
+  if (existing.status === "PROCESSING") {
+    return { ok: false, error: "La factura sigue procesándose." };
+  }
+
+  const raw = (formText(formData.get("tipoMoneda")) ?? "").toLowerCase();
+  const tipoMoneda = raw === "usd" ? "usd" : null;
+
+  await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { tipoMoneda },
+  });
+
+  const [updated] = await loadSerializedBatchInvoices(session.user.id, [
+    invoiceId,
+  ]);
+  if (!updated) {
+    return { ok: false, error: "No se pudo cargar la factura actualizada." };
+  }
+
+  revalidatePath("/history");
+  revalidatePath("/proveedores");
+  revalidatePath("/upload");
+  revalidatePath(`/history/${invoiceId}`);
+  return { ok: true, invoice: updated };
+}
+
 export type ReprocessInvoiceResult =
   | { ok: true; invoice: SerializedBatchInvoice }
   | { ok: false; error: string };
