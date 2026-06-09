@@ -1281,14 +1281,21 @@ export async function reprocessInvoice(
   if (!existing) {
     return { ok: false, error: "No se encontró la factura." };
   }
-  if (existing.status === "PROCESSING") {
-    return { ok: false, error: "La factura sigue procesándose." };
-  }
 
-  await prisma.invoice.update({
-    where: { id: invoiceId },
+  const previousStatus = existing.status;
+  const previousAiPayload = existing.aiPayload;
+
+  const claimed = await prisma.invoice.updateMany({
+    where: {
+      id: invoiceId,
+      userId,
+      status: { not: "PROCESSING" },
+    },
     data: { status: "PROCESSING" },
   });
+  if (claimed.count === 0) {
+    return { ok: false, error: "La factura sigue procesándose." };
+  }
 
   try {
     const fileParts =
@@ -1362,8 +1369,11 @@ export async function reprocessInvoice(
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: {
-        status: "ERROR",
-        aiPayload: { error: message } as object,
+        status: previousStatus,
+        aiPayload:
+          previousAiPayload == null
+            ? Prisma.JsonNull
+            : (previousAiPayload as Prisma.InputJsonValue),
       },
     });
     revalidatePath("/history");

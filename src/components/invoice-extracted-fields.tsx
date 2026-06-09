@@ -195,7 +195,7 @@ export function InvoiceExtractedFields({
 
   const handleReprocess = useCallback(async () => {
     const confirmed = window.confirm(
-      "¿Reprocesar esta factura? Se volverá a ejecutar la extracción con IA y se sobrescribirán los datos extraídos, incluidas las correcciones manuales.",
+      "¿Reprocesar esta factura? Se volverá a ejecutar la extracción con IA y se sobrescribirán los datos extraídos, incluidas las correcciones manuales. Si ya la enviaste al sistema de destino, tendrás que volver a cargarla.",
     );
     if (!confirmed) return;
 
