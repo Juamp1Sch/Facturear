@@ -136,6 +136,9 @@ export function InvoiceExtractedFields({
   const [draftSupplierCode, setDraftSupplierCode] = useState(
     invoiceProp.supplierCode ?? "",
   );
+  /** Solo se envía al guardar si el usuario eligió del listado en esta sesión de edición. */
+  const [explicitSelectedSupplierCode, setExplicitSelectedSupplierCode] =
+    useState("");
   const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const supplierSearchRequestIdRef = useRef(0);
@@ -183,6 +186,7 @@ export function InvoiceExtractedFields({
     setDraftProviderName(displayInvoice.providerName ?? "");
     setDraftProviderCuit(displayInvoice.providerCuit ?? "");
     setDraftSupplierCode(displayInvoice.supplierCode ?? "");
+    setExplicitSelectedSupplierCode("");
     setSuppliers([]);
   }, [
     editing,
@@ -196,17 +200,20 @@ export function InvoiceExtractedFields({
   const handleProviderNameChange = useCallback((name: string) => {
     setDraftProviderName(name);
     setDraftSupplierCode("");
+    setExplicitSelectedSupplierCode("");
   }, []);
 
   const handleProviderPick = useCallback((supplier: SupplierPickerOption) => {
     setDraftProviderName(supplier.name);
     setDraftProviderCuit(supplier.cuit ?? "");
     setDraftSupplierCode(supplier.code);
+    setExplicitSelectedSupplierCode(supplier.code);
   }, []);
 
   const handleProviderCuitChange = useCallback((cuit: string) => {
     setDraftProviderCuit(cuit);
     setDraftSupplierCode("");
+    setExplicitSelectedSupplierCode("");
   }, []);
 
   const empresaOpts = invoice.cuitEmpresaOptions ?? [];
@@ -284,6 +291,7 @@ export function InvoiceExtractedFields({
     setDraftProviderName(displayInvoice.providerName ?? "");
     setDraftProviderCuit(displayInvoice.providerCuit ?? "");
     setDraftSupplierCode(displayInvoice.supplierCode ?? "");
+    setExplicitSelectedSupplierCode("");
     setSuppliers([]);
     setFormKey((k) => k + 1);
     setError(null);
@@ -431,7 +439,7 @@ export function InvoiceExtractedFields({
             <input
               type="hidden"
               name="selectedSupplierCode"
-              value={draftSupplierCode}
+              value={explicitSelectedSupplierCode}
             />
 
             {invoice.movementId ? (
@@ -456,7 +464,7 @@ export function InvoiceExtractedFields({
                 <SupplierPicker
                   suppliers={suppliers}
                   name={draftProviderName}
-                  supplierCode={draftSupplierCode || null}
+                  supplierCode={explicitSelectedSupplierCode || null}
                   onNameChange={handleProviderNameChange}
                   onSupplierPick={handleProviderPick}
                   onSearch={loadSuppliers}
