@@ -14,6 +14,7 @@ import {
 import { buildInvoiceJson } from "@/lib/invoice-json";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
 import { formatMoney } from "@/lib/format-money";
+import { needsMissingPuntoDeVentaWarning } from "@/lib/numero-comprobante";
 import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
 import type { ResolvedTaxChartAccounts } from "@/lib/tax-chart-account";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
@@ -87,6 +88,9 @@ export function InvoiceDetail({
     invoice.rawOcrText,
   );
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
+  const showMissingPuntoDeVentaWarning = needsMissingPuntoDeVentaWarning(
+    invoice.invoiceNumber,
+  );
 
   const contableJson = buildInvoiceJson({
     movementId: invoice.movementId,
@@ -140,6 +144,11 @@ export function InvoiceDetail({
             {amountsReview.discrepancy != null
               ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
               : ""}
+          </Badge>
+        ) : null}
+        {showMissingPuntoDeVentaWarning ? (
+          <Badge variant="outline" className="border-amber-500 text-amber-800 dark:text-amber-300">
+            Revisar Nº comprobante
           </Badge>
         ) : null}
         {invoice.aiConfidence != null ? (

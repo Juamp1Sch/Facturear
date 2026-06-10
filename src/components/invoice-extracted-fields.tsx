@@ -48,6 +48,7 @@ import {
 } from "@/lib/document-class";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
 import type { SupplierPickerOption } from "@/types/supplier";
+import { needsMissingPuntoDeVentaWarning } from "@/lib/numero-comprobante";
 import { cn } from "@/lib/utils";
 
 function effectiveDocumentKind(invoice: SerializedInvoiceDetail): DocumentKind {
@@ -349,6 +350,9 @@ export function InvoiceExtractedFields({
     invoice.perceptionsAmount,
     perceptionAccountCount,
   );
+  const showMissingPuntoDeVentaWarning = needsMissingPuntoDeVentaWarning(
+    invoice.invoiceNumber,
+  );
 
   return (
     <Card>
@@ -413,6 +417,28 @@ export function InvoiceExtractedFields({
             factura no trae desglose por renglón. El JSON contable asignará todo el importe
             a la primera cuenta hasta que la extracción incluya{" "}
             <code className="text-xs">perception_lines</code>.
+          </div>
+        ) : null}
+
+        {showMissingPuntoDeVentaWarning ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            <p>
+              No fue posible detectar automáticamente el punto de venta del comprobante
+              escaneado.
+              {invoice.invoiceNumber?.trim() ? (
+                <>
+                  {" "}
+                  El valor leído fue &quot;{invoice.invoiceNumber.trim()}&quot;, sin el
+                  formato requerido (Punto de Venta - Nro comprobante).
+                </>
+              ) : null}
+            </p>
+            <p className="mt-2">
+              Revise el comprobante y, si dispone de la información correspondiente,
+              ingrese el número completo desde la opción &quot;Editar&quot;, respetando el
+              formato{" "}
+              <span className="font-mono text-xs">00001-00011111</span>.
+            </p>
           </div>
         ) : null}
 
