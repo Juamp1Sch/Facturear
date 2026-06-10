@@ -150,16 +150,24 @@ export type SupplierPickerOption = {
   cuit: string | null;
 };
 
-export async function listSuppliersForPicker(): Promise<SupplierPickerOption[]> {
+const PICKER_SEARCH_LIMIT = 25;
+
+export async function searchSuppliersForPicker(
+  searchQuery?: string | null,
+  limit: number = PICKER_SEARCH_LIMIT,
+): Promise<SupplierPickerOption[]> {
   if (!isDatabaseConfigured()) return [];
   const session = await auth();
   if (!session?.user?.id) {
     redirect("/iniciar-sesion");
   }
+  const userId = session.user.id;
+  const where = buildSupplierSearchWhere(userId, searchQuery);
   return prisma.supplier.findMany({
-    where: { userId: session.user.id },
+    where,
     select: { id: true, code: true, name: true, cuit: true },
     orderBy: { name: "asc" },
+    take: limit,
   });
 }
 

@@ -5,15 +5,25 @@ import { findSupplierCodeByAlias, rememberSupplierAlias } from "@/lib/supplier-a
 import { findSupplierCodeForUserCuit } from "@/lib/supplier-sync";
 import { prisma } from "@/lib/db";
 
+export type MaestroSupplierDetail = MaestroSupplierPick & { name: string };
+
+export async function pickSupplierByCode(
+  userId: string,
+  code: string,
+): Promise<MaestroSupplierDetail | null> {
+  const row = await prisma.supplier.findFirst({
+    where: { userId, code },
+    select: { code: true, cuit: true, name: true },
+  });
+  return row ? { code: row.code, cuit: row.cuit, name: row.name } : null;
+}
+
 async function pickByCode(
   userId: string,
   code: string,
 ): Promise<MaestroSupplierPick | null> {
-  const row = await prisma.supplier.findFirst({
-    where: { userId, code },
-    select: { code: true, cuit: true },
-  });
-  return row ? { code: row.code, cuit: row.cuit } : null;
+  const picked = await pickSupplierByCode(userId, code);
+  return picked ? { code: picked.code, cuit: picked.cuit } : null;
 }
 
 /**

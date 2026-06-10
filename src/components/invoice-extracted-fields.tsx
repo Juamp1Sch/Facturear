@@ -12,7 +12,7 @@ import {
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
 import {
-  listSuppliersForPicker,
+  searchSuppliersForPicker,
   type SupplierPickerOption,
 } from "@/actions/suppliers";
 import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
@@ -159,15 +159,31 @@ export function InvoiceExtractedFields({
     setDraftDocumentKind(effectiveDocumentKind(displayInvoice));
   }, [displayInvoice.id, displayInvoice.documentKind, displayInvoice.documentClass]);
 
+  const loadSuppliers = useCallback(async (query: string) => {
+    setSuppliersLoading(true);
+    try {
+      const results = await searchSuppliersForPicker(query);
+      setSuppliers(results);
+    } catch {
+      setError(
+        "No se pudieron cargar los proveedores. Cerrá y volvé a abrir la edición.",
+      );
+      setSuppliers([]);
+    } finally {
+      setSuppliersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!editing) return;
     setDraftProviderName(displayInvoice.providerName ?? "");
     setDraftProviderCuit(displayInvoice.providerCuit ?? "");
     setDraftSupplierCode(displayInvoice.supplierCode ?? "");
-    setSuppliersLoading(true);
-    void listSuppliersForPicker()
-      .then(setSuppliers)
-      .finally(() => setSuppliersLoading(false));
+    void loadSuppliers(
+      displayInvoice.providerName?.trim() ||
+        displayInvoice.supplierCode?.trim() ||
+        "",
+    );
   }, [
     editing,
     formKey,
@@ -175,6 +191,7 @@ export function InvoiceExtractedFields({
     displayInvoice.providerName,
     displayInvoice.providerCuit,
     displayInvoice.supplierCode,
+    loadSuppliers,
   ]);
 
   const handleProviderNameChange = useCallback((name: string) => {
@@ -435,6 +452,7 @@ export function InvoiceExtractedFields({
                   supplierCode={draftSupplierCode || null}
                   onNameChange={handleProviderNameChange}
                   onSupplierPick={handleProviderPick}
+                  onSearch={loadSuppliers}
                   loading={suppliersLoading}
                   inputId="providerName"
                 />

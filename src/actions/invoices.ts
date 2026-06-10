@@ -59,7 +59,7 @@ import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
 import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
 import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
-import { resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
+import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
@@ -1088,13 +1088,14 @@ export async function updateInvoiceExtractedFields(
 
   const explicitCode = formText(formData.get("selectedSupplierCode"));
   let resolved = null as { code: string; cuit: string | null } | null;
+  let finalProviderName = providerName;
 
   if (explicitCode) {
-    const row = await prisma.supplier.findFirst({
-      where: { userId: session.user.id, code: explicitCode },
-      select: { code: true, cuit: true },
-    });
-    if (row) resolved = { code: row.code, cuit: row.cuit };
+    const picked = await pickSupplierByCode(session.user.id, explicitCode);
+    if (picked) {
+      resolved = { code: picked.code, cuit: picked.cuit };
+      finalProviderName = picked.name;
+    }
   }
 
   if (!resolved) {
@@ -1109,7 +1110,7 @@ export async function updateInvoiceExtractedFields(
 
   // Recordar el alias nombre→proveedor para que futuros presupuestos con el
   // mismo membrete (aunque abreviado) se asocien automáticamente.
-  await rememberSupplierAlias(session.user.id, providerName, supplierCode);
+  await rememberSupplierAlias(session.user.id, finalProviderName, supplierCode);
 
   await upsertCuitEmpresa(session.user.id, finalCuit, empresa);
   await upsertCuitSucursal(session.user.id, finalCuit, sucursal);
@@ -1185,7 +1186,7 @@ export async function updateInvoiceExtractedFields(
   await prisma.invoice.update({
     where: { id: invoiceId },
     data: {
-      providerName,
+      providerName: finalProviderName,
       providerCuit: finalCuit,
       supplierCode,
       empresa,
