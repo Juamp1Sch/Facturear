@@ -5,6 +5,21 @@
 
 const TWO_PART_PATTERN = /^(\d+)\s*[-/]\s*(\d+)$/;
 
+/** Comprobante AFIP con punto de venta y número (ej. 00004-00059991). */
+export function hasAfipPuntoDeVentaNumero(
+  invoiceNumber: string | null | undefined,
+): boolean {
+  const trimmed = typeof invoiceNumber === "string" ? invoiceNumber.trim() : "";
+  return trimmed.length > 0 && TWO_PART_PATTERN.test(trimmed);
+}
+
+/** Aviso cuando el escaneo no trajo punto de venta (null o sin formato PV-Nro). */
+export function needsMissingPuntoDeVentaWarning(
+  invoiceNumber: string | null | undefined,
+): boolean {
+  return !hasAfipPuntoDeVentaNumero(invoiceNumber);
+}
+
 /**
  * Normaliza el número devuelto por la IA o ingresado manualmente.
  * Si hay dos grupos numéricos separados por - o /, aplica padding 5-8.
