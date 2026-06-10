@@ -3,7 +3,7 @@
 import { Pencil, RefreshCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   reprocessInvoice,
@@ -11,7 +11,9 @@ import {
   setInvoiceTipoMoneda,
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
+import { searchSuppliersForPicker } from "@/actions/suppliers";
 import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
+import { SupplierPicker } from "@/components/supplier-picker";
 import {
   CurrencyToggle,
   type CurrencyValue,
@@ -45,6 +47,7 @@ import {
   parseFiscalDocumentClass,
 } from "@/lib/document-class";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
+import type { SupplierPickerOption } from "@/types/supplier";
 import { cn } from "@/lib/utils";
 
 function effectiveDocumentKind(invoice: SerializedInvoiceDetail): DocumentKind {
@@ -124,6 +127,21 @@ export function InvoiceExtractedFields({
   const [assocSaving, setAssocSaving] = useState(false);
   const [currencySaving, setCurrencySaving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
+  const [draftProviderName, setDraftProviderName] = useState(
+    invoiceProp.providerName ?? "",
+  );
+  const [draftProviderCuit, setDraftProviderCuit] = useState(
+    invoiceProp.providerCuit ?? "",
+  );
+  const [draftSupplierCode, setDraftSupplierCode] = useState(
+    invoiceProp.supplierCode ?? "",
+  );
+  /** Solo se envía al guardar si el usuario eligió del listado en esta sesión de edición. */
+  const [explicitSelectedSupplierCode, setExplicitSelectedSupplierCode] =
+    useState("");
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const supplierSearchRequestIdRef = useRef(0);
 
   useEffect(() => {
     setDisplayInvoice(invoiceProp);
@@ -142,6 +160,61 @@ export function InvoiceExtractedFields({
   useEffect(() => {
     setDraftDocumentKind(effectiveDocumentKind(displayInvoice));
   }, [displayInvoice.id, displayInvoice.documentKind, displayInvoice.documentClass]);
+
+  const loadSuppliers = useCallback(async (query: string) => {
+    const requestId = ++supplierSearchRequestIdRef.current;
+    setSuppliersLoading(true);
+    try {
+      const results = await searchSuppliersForPicker(query);
+      if (requestId !== supplierSearchRequestIdRef.current) return;
+      setSuppliers(results);
+    } catch {
+      if (requestId !== supplierSearchRequestIdRef.current) return;
+      setError(
+        "No se pudieron cargar los proveedores. Cerrá y volvé a abrir la edición.",
+      );
+      setSuppliers([]);
+    } finally {
+      if (requestId === supplierSearchRequestIdRef.current) {
+        setSuppliersLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!editing) return;
+    setDraftProviderName(displayInvoice.providerName ?? "");
+    setDraftProviderCuit(displayInvoice.providerCuit ?? "");
+    setDraftSupplierCode(displayInvoice.supplierCode ?? "");
+    setExplicitSelectedSupplierCode("");
+    setSuppliers([]);
+  }, [
+    editing,
+    formKey,
+    displayInvoice.id,
+    displayInvoice.providerName,
+    displayInvoice.providerCuit,
+    displayInvoice.supplierCode,
+  ]);
+
+  const handleProviderNameChange = useCallback((name: string) => {
+    setDraftProviderName(name);
+    setDraftSupplierCode("");
+    setExplicitSelectedSupplierCode("");
+  }, []);
+
+  const handleProviderPick = useCallback((supplier: SupplierPickerOption) => {
+    setDraftProviderName(supplier.name);
+    setDraftProviderCuit(supplier.cuit ?? "");
+    setDraftSupplierCode(supplier.code);
+    setExplicitSelectedSupplierCode(supplier.code);
+  }, []);
+
+  const handleProviderCuitChange = useCallback((cuit: string) => {
+    setDraftProviderCuit(cuit);
+    setDraftSupplierCode("");
+    setExplicitSelectedSupplierCode("");
+  }, []);
 
   const empresaOpts = invoice.cuitEmpresaOptions ?? [];
   const sucursalOpts = invoice.cuitSucursalOptions ?? [];
@@ -215,10 +288,19 @@ export function InvoiceExtractedFields({
   const canEdit = invoice.status !== "PROCESSING";
 
   const openEdit = useCallback(() => {
+    setDraftProviderName(displayInvoice.providerName ?? "");
+    setDraftProviderCuit(displayInvoice.providerCuit ?? "");
+    setDraftSupplierCode(displayInvoice.supplierCode ?? "");
+    setExplicitSelectedSupplierCode("");
+    setSuppliers([]);
     setFormKey((k) => k + 1);
     setError(null);
     setEditing(true);
-  }, []);
+  }, [
+    displayInvoice.providerName,
+    displayInvoice.providerCuit,
+    displayInvoice.supplierCode,
+  ]);
 
   const closeEdit = useCallback(() => {
     setEditing(false);
@@ -352,6 +434,13 @@ export function InvoiceExtractedFields({
             }}
           >
             <input type="hidden" name="invoiceId" value={invoice.id} />
+            <input type="hidden" name="providerName" value={draftProviderName} />
+            <input type="hidden" name="providerCuit" value={draftProviderCuit} />
+            <input
+              type="hidden"
+              name="selectedSupplierCode"
+              value={explicitSelectedSupplierCode}
+            />
 
             {invoice.movementId ? (
               <div className="space-y-2">
@@ -372,11 +461,27 @@ export function InvoiceExtractedFields({
                 <label htmlFor="providerName" className="text-sm font-medium">
                   Proveedor
                 </label>
+                <SupplierPicker
+                  suppliers={suppliers}
+                  name={draftProviderName}
+                  supplierCode={explicitSelectedSupplierCode || null}
+                  onNameChange={handleProviderNameChange}
+                  onSupplierPick={handleProviderPick}
+                  onSearch={loadSuppliers}
+                  loading={suppliersLoading}
+                  inputId="providerName"
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="supplierCode" className="text-sm font-medium">
+                  Código proveedor
+                </label>
                 <Input
-                  id="providerName"
-                  name="providerName"
-                  defaultValue={invoice.providerName ?? ""}
-                  autoComplete="organization"
+                  id="supplierCode"
+                  value={draftSupplierCode}
+                  readOnly
+                  className="bg-muted"
+                  placeholder="Se completa al elegir del maestro"
                 />
               </div>
               <div className="space-y-2">
@@ -385,8 +490,8 @@ export function InvoiceExtractedFields({
                 </label>
                 <Input
                   id="providerCuit"
-                  name="providerCuit"
-                  defaultValue={invoice.providerCuit ?? ""}
+                  value={draftProviderCuit}
+                  onChange={(e) => handleProviderCuitChange(e.target.value)}
                   placeholder="XX-XXXXXXXX-X (11 dígitos, cabecera del emisor)"
                   inputMode="numeric"
                   autoComplete="off"
@@ -454,7 +559,7 @@ export function InvoiceExtractedFields({
                 </select>
               </div>
               <div className="space-y-2">
-                <span className="text-sm font-medium">Moneda</span>
+                <span className="block text-sm font-medium">Moneda</span>
                 <CurrencyToggle
                   value={currencyValue}
                   disabled={currencySaving}

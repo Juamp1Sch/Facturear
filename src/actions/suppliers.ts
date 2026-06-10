@@ -15,7 +15,7 @@ import {
   setCuitAssociations,
 } from "@/lib/cuit-associations";
 import { syncInvoiceSupplierCodesForUser } from "@/lib/supplier-sync";
-import type { SerializedSupplier } from "@/types/supplier";
+import type { SerializedSupplier, SupplierPickerOption } from "@/types/supplier";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -141,6 +141,30 @@ export async function countSuppliersForUser(): Promise<number> {
   const session = await auth();
   if (!session?.user?.id) return 0;
   return prisma.supplier.count({ where: { userId: session.user.id } });
+}
+
+export type { SupplierPickerOption } from "@/types/supplier";
+
+const PICKER_SEARCH_LIMIT = 25;
+
+export async function searchSuppliersForPicker(
+  searchQuery?: string | null,
+  limit: number = PICKER_SEARCH_LIMIT,
+): Promise<SupplierPickerOption[]> {
+  if (!isDatabaseConfigured()) return [];
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+  const userId = session.user.id;
+  const where = buildSupplierSearchWhere(userId, searchQuery);
+  const cappedLimit = Math.min(Math.max(1, limit), PICKER_SEARCH_LIMIT);
+  return prisma.supplier.findMany({
+    where,
+    select: { id: true, code: true, name: true, cuit: true },
+    orderBy: { name: "asc" },
+    take: cappedLimit,
+  });
 }
 
 const SUPPLIERS_PAGE_SIZE = 25;
