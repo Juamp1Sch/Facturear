@@ -9,3 +9,9 @@ export type SerializedSupplier = {
   empresas: string[];
   sucursales: string[];
 };
+
+/** Subconjunto del maestro usado en el picker de edición de facturas. */
+export type SupplierPickerOption = Pick<
+  SerializedSupplier,
+  "id" | "code" | "name" | "cuit"
+>;

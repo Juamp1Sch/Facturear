@@ -3,7 +3,7 @@
 import { Pencil, RefreshCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   reprocessInvoice,
@@ -11,10 +11,7 @@ import {
   setInvoiceTipoMoneda,
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
-import {
-  searchSuppliersForPicker,
-  type SupplierPickerOption,
-} from "@/actions/suppliers";
+import { searchSuppliersForPicker } from "@/actions/suppliers";
 import { CuitAssociationTabs } from "@/components/cuit-association-tabs";
 import { SupplierPicker } from "@/components/supplier-picker";
 import {
@@ -50,6 +47,7 @@ import {
   parseFiscalDocumentClass,
 } from "@/lib/document-class";
 import type { SerializedInvoiceDetail } from "@/types/invoice";
+import type { SupplierPickerOption } from "@/types/supplier";
 import { cn } from "@/lib/utils";
 
 function effectiveDocumentKind(invoice: SerializedInvoiceDetail): DocumentKind {
@@ -140,6 +138,7 @@ export function InvoiceExtractedFields({
   );
   const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const supplierSearchRequestIdRef = useRef(0);
 
   useEffect(() => {
     setDisplayInvoice(invoiceProp);
@@ -160,17 +159,22 @@ export function InvoiceExtractedFields({
   }, [displayInvoice.id, displayInvoice.documentKind, displayInvoice.documentClass]);
 
   const loadSuppliers = useCallback(async (query: string) => {
+    const requestId = ++supplierSearchRequestIdRef.current;
     setSuppliersLoading(true);
     try {
       const results = await searchSuppliersForPicker(query);
+      if (requestId !== supplierSearchRequestIdRef.current) return;
       setSuppliers(results);
     } catch {
+      if (requestId !== supplierSearchRequestIdRef.current) return;
       setError(
         "No se pudieron cargar los proveedores. Cerrá y volvé a abrir la edición.",
       );
       setSuppliers([]);
     } finally {
-      setSuppliersLoading(false);
+      if (requestId === supplierSearchRequestIdRef.current) {
+        setSuppliersLoading(false);
+      }
     }
   }, []);
 
@@ -179,11 +183,7 @@ export function InvoiceExtractedFields({
     setDraftProviderName(displayInvoice.providerName ?? "");
     setDraftProviderCuit(displayInvoice.providerCuit ?? "");
     setDraftSupplierCode(displayInvoice.supplierCode ?? "");
-    void loadSuppliers(
-      displayInvoice.providerName?.trim() ||
-        displayInvoice.supplierCode?.trim() ||
-        "",
-    );
+    setSuppliers([]);
   }, [
     editing,
     formKey,
@@ -191,7 +191,6 @@ export function InvoiceExtractedFields({
     displayInvoice.providerName,
     displayInvoice.providerCuit,
     displayInvoice.supplierCode,
-    loadSuppliers,
   ]);
 
   const handleProviderNameChange = useCallback((name: string) => {
@@ -282,10 +281,18 @@ export function InvoiceExtractedFields({
   const canEdit = invoice.status !== "PROCESSING";
 
   const openEdit = useCallback(() => {
+    setDraftProviderName(displayInvoice.providerName ?? "");
+    setDraftProviderCuit(displayInvoice.providerCuit ?? "");
+    setDraftSupplierCode(displayInvoice.supplierCode ?? "");
+    setSuppliers([]);
     setFormKey((k) => k + 1);
     setError(null);
     setEditing(true);
-  }, []);
+  }, [
+    displayInvoice.providerName,
+    displayInvoice.providerCuit,
+    displayInvoice.supplierCode,
+  ]);
 
   const closeEdit = useCallback(() => {
     setEditing(false);

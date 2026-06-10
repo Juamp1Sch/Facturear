@@ -1095,10 +1095,14 @@ export async function updateInvoiceExtractedFields(
     if (picked) {
       resolved = { code: picked.code, cuit: picked.cuit };
       finalProviderName = picked.name;
+    } else {
+      return {
+        ok: false,
+        error:
+          "El proveedor seleccionado ya no existe en el maestro. Elegilo de nuevo o guardá sin selección explícita.",
+      };
     }
-  }
-
-  if (!resolved) {
+  } else {
     resolved = await resolveOrCreateInvoiceSupplier(
       session.user.id,
       providerName,

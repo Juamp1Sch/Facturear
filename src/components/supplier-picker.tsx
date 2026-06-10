@@ -4,9 +4,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 
-import type { SupplierPickerOption } from "@/actions/suppliers";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import type { SupplierPickerOption } from "@/types/supplier";
 
 export function SupplierPicker({
   suppliers,
@@ -34,6 +34,7 @@ export function SupplierPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLElement | null>(null);
   const onSearchRef = useRef(onSearch);
+  const skipNextDebouncedSearchRef = useRef(true);
 
   const [query, setQuery] = useState(name);
   const [open, setOpen] = useState(false);
@@ -57,6 +58,17 @@ export function SupplierPicker({
   }, [name, open]);
 
   useEffect(() => {
+    onSearchRef.current(name);
+    skipNextDebouncedSearchRef.current = true;
+    // Búsqueda inicial al montar; el form remonta vía formKey al reabrir edición.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
+  }, []);
+
+  useEffect(() => {
+    if (skipNextDebouncedSearchRef.current) {
+      skipNextDebouncedSearchRef.current = false;
+      return;
+    }
     const timer = window.setTimeout(() => {
       onSearchRef.current(query);
     }, 300);
