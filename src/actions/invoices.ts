@@ -1086,11 +1086,24 @@ export async function updateInvoiceExtractedFields(
     throw e;
   }
 
-  const resolved = await resolveOrCreateInvoiceSupplier(
-    session.user.id,
-    providerName,
-    providerCuit,
-  );
+  const explicitCode = formText(formData.get("selectedSupplierCode"));
+  let resolved = null as { code: string; cuit: string | null } | null;
+
+  if (explicitCode) {
+    const row = await prisma.supplier.findFirst({
+      where: { userId: session.user.id, code: explicitCode },
+      select: { code: true, cuit: true },
+    });
+    if (row) resolved = { code: row.code, cuit: row.cuit };
+  }
+
+  if (!resolved) {
+    resolved = await resolveOrCreateInvoiceSupplier(
+      session.user.id,
+      providerName,
+      providerCuit,
+    );
+  }
   const finalCuit = resolved?.cuit ?? providerCuit;
   const supplierCode = resolved?.code ?? null;
 

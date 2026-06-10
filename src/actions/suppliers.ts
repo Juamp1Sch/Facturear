@@ -143,6 +143,26 @@ export async function countSuppliersForUser(): Promise<number> {
   return prisma.supplier.count({ where: { userId: session.user.id } });
 }
 
+export type SupplierPickerOption = {
+  id: string;
+  code: string;
+  name: string;
+  cuit: string | null;
+};
+
+export async function listSuppliersForPicker(): Promise<SupplierPickerOption[]> {
+  if (!isDatabaseConfigured()) return [];
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+  return prisma.supplier.findMany({
+    where: { userId: session.user.id },
+    select: { id: true, code: true, name: true, cuit: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 const SUPPLIERS_PAGE_SIZE = 25;
 
 export async function listSuppliersPageForUser(
