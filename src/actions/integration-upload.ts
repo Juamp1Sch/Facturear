@@ -101,8 +101,10 @@ export async function uploadInvoiceToDestination(
         }
       : null,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
-    perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    perceptionIvaAccountCode: taxChartAccounts.perceptionIvaAccountCode,
+    perceptionIibbAccountCode: taxChartAccounts.perceptionIibbAccountCode,
     bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
+    ignoreBonificaciones: taxChartAccounts.ignoreBonificaciones,
     tipoMoneda: invoice.tipoMoneda,
   });
 

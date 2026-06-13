@@ -2,7 +2,7 @@ import {
   parseDiscountResolutionFromPayload,
   resolveDiscountBreakdown,
 } from "@/lib/discount-breakdown";
-import type { TaxBreakdownLine } from "@/lib/schemas";
+import type { PerceptionLine, TaxBreakdownLine } from "@/lib/schemas";
 import { sumTaxLines } from "@/lib/tax-lines";
 
 export type { TaxBreakdownLine };
@@ -24,9 +24,21 @@ function parseLines(raw: unknown): TaxBreakdownLine[] | null {
   return lines.length > 0 ? lines : null;
 }
 
+/** Como parseLines pero conserva el `kind` (IVA/IIBB) de cada percepción. */
+function parsePerceptionLines(raw: unknown): PerceptionLine[] | null {
+  const lines = parseLines(raw);
+  if (!lines) return null;
+  return lines.map((l) => {
+    const kindRaw = (l as { kind?: unknown }).kind;
+    const kind =
+      kindRaw === "IVA" || kindRaw === "IIBB" ? kindRaw : null;
+    return { label: l.label, amount: l.amount, kind };
+  });
+}
+
 export function parseTaxBreakdownFromPayload(aiPayload: unknown): {
   vatLines: TaxBreakdownLine[] | null;
-  perceptionLines: TaxBreakdownLine[] | null;
+  perceptionLines: PerceptionLine[] | null;
 } {
   if (!aiPayload || typeof aiPayload !== "object" || Array.isArray(aiPayload)) {
     return { vatLines: null, perceptionLines: null };
@@ -34,7 +46,7 @@ export function parseTaxBreakdownFromPayload(aiPayload: unknown): {
   const o = aiPayload as Record<string, unknown>;
   return {
     vatLines: parseLines(o.vat_lines),
-    perceptionLines: parseLines(o.perception_lines),
+    perceptionLines: parsePerceptionLines(o.perception_lines),
   };
 }
 

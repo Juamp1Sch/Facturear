@@ -108,11 +108,14 @@ export function InvoiceExtractedFields({
   invoice: invoiceProp,
   onInvoiceUpdated,
   perceptionAccountCount = 0,
+  ignoreBonificaciones = false,
 }: {
   invoice: SerializedInvoiceDetail;
   onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
-  /** Cantidad de cuentas de percepción configuradas (para aviso de desglose). */
+  /** Cantidad de slots de percepción configurados (para aviso de desglose). */
   perceptionAccountCount?: number;
+  /** Si el usuario eligió ignorar bonificaciones, no se muestran en la factura. */
+  ignoreBonificaciones?: boolean;
 }) {
   const router = useRouter();
   const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
@@ -413,10 +416,10 @@ export function InvoiceExtractedFields({
 
         {showPerceptionBreakdownWarning ? (
           <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-            Tenés {perceptionAccountCount} cuentas de percepción configuradas, pero esta
-            factura no trae desglose por renglón. El JSON contable asignará todo el importe
-            a la primera cuenta hasta que la extracción incluya{" "}
-            <code className="text-xs">perception_lines</code>.
+            Tenés cuentas de percepción IVA e IIBB configuradas, pero esta factura no trae
+            desglose por renglón. El JSON contable asignará todo el importe a la cuenta de
+            IIBB hasta que la extracción incluya{" "}
+            <code className="text-xs">perception_lines</code> con su tipo.
           </div>
         ) : null}
 
@@ -684,21 +687,23 @@ export function InvoiceExtractedFields({
                   placeholder="0 o 1234,56"
                 />
               </div>
-              <div className="space-y-2">
-                <label htmlFor="discountAmount" className="text-sm font-medium">
-                  Bonificación
-                </label>
-                <Input
-                  id="discountAmount"
-                  name="discountAmount"
-                  defaultValue={amountInputDefault(discountBreakdown.discountAmount)}
-                  inputMode="decimal"
-                  placeholder="0 o 1234,56"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Bonificaciones globales del comprobante. Dejá vacío si no aplica.
-                </p>
-              </div>
+              {!ignoreBonificaciones ? (
+                <div className="space-y-2">
+                  <label htmlFor="discountAmount" className="text-sm font-medium">
+                    Bonificación
+                  </label>
+                  <Input
+                    id="discountAmount"
+                    name="discountAmount"
+                    defaultValue={amountInputDefault(discountBreakdown.discountAmount)}
+                    inputMode="decimal"
+                    placeholder="0 o 1234,56"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Bonificaciones globales del comprobante. Dejá vacío si no aplica.
+                  </p>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <label htmlFor="totalAmount" className="text-sm font-medium">
                   Total
@@ -898,7 +903,8 @@ export function InvoiceExtractedFields({
               <dt className="text-sm font-medium text-muted-foreground">Percepciones</dt>
               <dd className="text-sm">{formatMoney(invoice.perceptionsAmount)}</dd>
             </div>
-            {discountBreakdown.discountAmount != null &&
+            {!ignoreBonificaciones &&
+            discountBreakdown.discountAmount != null &&
             discountBreakdown.discountAmount > 0 ? (
               <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
                 <dt className="text-sm font-medium text-muted-foreground">Bonificación</dt>

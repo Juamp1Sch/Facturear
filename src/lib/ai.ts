@@ -47,7 +47,7 @@ const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
 - Desglose fiscal (pie de factura / tabla de impuestos / totales): leé cada renglón por separado.
 - vat_lines: cada fila de IVA con label (ej. "IVA 21%", "IVA 10,5%") y amount. Si hay un solo importe de IVA, un solo elemento. null si no hay IVA.
 - vat_amount: suma de los amount de vat_lines, o el único importe de IVA si no hay desglose.
-- perception_lines: cada percepción impositiva CON IMPORTE MAYOR A 0, con label que indique el tipo y amount. Distinguí percepción de IIBB/ingresos brutos (ej. "Perc. IIBB Bs.As.", "Percepción IIBB CABA") de percepción de IVA (ej. "Perc. IVA", "Percepción IVA"). IMPORTANTE: a veces hay una grilla titulada "PERCEPCIONES IIBB" con varias jurisdicciones (C.A.B.A., Bs.As., Tucumán, etc.) en 0,00 y, dentro o debajo de esa misma grilla, un renglón "Perc. IVA" con importe; en ese caso devolvé SOLO los renglones con importe > 0 y conservá su tipo real ("Perc. IVA" es percepción de IVA aunque esté bajo el título IIBB). NO incluyas renglones en 0,00. null si no hay ninguna percepción con importe.
+- perception_lines: cada percepción impositiva CON IMPORTE MAYOR A 0, con label que indique el tipo, amount y kind. kind = "IVA" para percepción de IVA (ej. "Perc. IVA", "Percepción IVA") y kind = "IIBB" para percepción de Ingresos Brutos (ej. "Perc. IIBB Bs.As.", "Percepción IIBB CABA"). REGLA CLAVE: clasificá el kind por el CONCEPTO del renglón, NO por el título de la sección. A veces hay una grilla titulada "PERCEPCIONES IIBB" con varias jurisdicciones (C.A.B.A., Bs.As., Tucumán, etc.) en 0,00 y, dentro o debajo de esa misma grilla, un renglón "Perc. IVA" con importe: ese renglón es kind "IVA" aunque esté bajo el título IIBB. Devolvé SOLO los renglones con importe > 0 y su kind real. NO incluyas renglones en 0,00. null si no hay ninguna percepción con importe.
 - perceptions_amount: suma de los amount de perception_lines, o el total de percepciones si no hay desglose.
 - discount_lines: ARRAY con UN elemento por cada bonificación GLOBAL con importe > 0 (ej. filas "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" repetidas — Jeluz). CRÍTICO: si hay 7 filas Jeluz, devolvé 7 objetos. NO incluyas: columna "Bon (%)" del detalle; renglones "DESCUENTO X %" del detalle si el Subtotal del pie ya los refleja (LIPO, SAP, etc.); rótulos sin importe (ej. "BONIFICACION EN MERCADERIAS"); Subtotal ni "Saldo en cuenta". Si neto+IVA+percepciones≈total y los descuentos solo aparecen en el detalle de ítems, discount_lines null.
 - discount_amount: suma de discount_lines. null si los descuentos ya están incluidos en net_amount/subtotal. NO sumes bonificaciones en el cuadre net+IVA+percepciones≈total.
@@ -289,7 +289,7 @@ Reglas CRÍTICAS:
 - Leé dígito por dígito. Cuidado con 4/6 (61,38 vs 59,38 o 41,38) y en el Total (1.546,72 vs 1.544,72).
 - CRUZÁ perceptions_amount (derecha) con perceptions_amount_secondary (izquierda): si difieren, releé ambos antes de responder.
 - ANTES de responder, verificá net_amount + vat_amount + perceptions_amount ≈ total_amount. Si no cierra, releé cada dígito del Total y de Percepciones.
-- vat_lines y perception_lines: solo si hay desglose visible.
+- vat_lines y perception_lines: solo si hay desglose visible. En cada perception_line seteá kind: "IVA" para percepción de IVA y "IIBB" para percepción de Ingresos Brutos, según el CONCEPTO del renglón (un "Perc. IVA" bajo un título "PERCEPCIONES IIBB" es kind "IVA").
 - Si un importe no es legible, null (no inventes).`;
 
 /**

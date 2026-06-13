@@ -155,8 +155,10 @@ export function UploadBatchResultsView({
     totalAmount: invoice.totalAmount,
     chartAccount: invoice.chartAccount,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
-    perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    perceptionIvaAccountCode: taxChartAccounts.perceptionIvaAccountCode,
+    perceptionIibbAccountCode: taxChartAccounts.perceptionIibbAccountCode,
     bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
+    ignoreBonificaciones: taxChartAccounts.ignoreBonificaciones,
     tipoMoneda: invoice.tipoMoneda,
   });
 
@@ -216,7 +218,11 @@ export function UploadBatchResultsView({
         <InvoiceExtractedFields
           invoice={invoice}
           onInvoiceUpdated={onInvoiceUpdated}
-          perceptionAccountCount={taxChartAccounts.perceptionsAccounts.length}
+          perceptionAccountCount={
+            (taxChartAccounts.perceptionIvaAccountCode ? 1 : 0) +
+            (taxChartAccounts.perceptionIibbAccountCode ? 1 : 0)
+          }
+          ignoreBonificaciones={taxChartAccounts.ignoreBonificaciones}
         />
       </div>
 
