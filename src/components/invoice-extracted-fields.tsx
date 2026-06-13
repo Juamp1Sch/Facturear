@@ -703,7 +703,15 @@ export function InvoiceExtractedFields({
                     Bonificaciones globales del comprobante. Dejá vacío si no aplica.
                   </p>
                 </div>
-              ) : null}
+              ) : (
+                // Flag activo: el campo se oculta pero preservamos el valor para
+                // que un guardado posterior no borre la bonificación del payload.
+                <input
+                  type="hidden"
+                  name="discountAmount"
+                  defaultValue={amountInputDefault(discountBreakdown.discountAmount)}
+                />
+              )}
               <div className="space-y-2">
                 <label htmlFor="totalAmount" className="text-sm font-medium">
                   Total

@@ -97,7 +97,7 @@ export function parseDiscountFromPayload(
   );
 }
 
-/** Aviso cuando hay varias cuentas de percepción pero el JSON usaría solo la primera. */
+/** Aviso cuando hay cuentas de percepción IVA e IIBB configuradas pero la factura no trae desglose, así que el JSON asigna todo el importe a un solo slot (IIBB). */
 export function needsPerceptionBreakdownWarning(
   aiPayload: unknown,
   perceptionsAmount: string | number | null | undefined,

@@ -131,16 +131,19 @@ function buildPerceptionContableLines(
   const fromBreakdown = perceptionLines?.filter((l) => l.amount > 0) ?? [];
 
   if (fromBreakdown.length > 0) {
-    return fromBreakdown.map((l) => {
-      // La IA marca el kind explícito; si falta, caemos al regex sobre el label.
-      const kind = l.kind ?? (classifyPerceptionTipoImpuesto(l.label) === "PIV" ? "IVA" : "IIBB");
-      const { cuenta, tipoImpuesto } = perceptionAccountForKind(
-        kind,
-        ivaAccountCode,
-        iibbAccountCode,
-      );
-      return { monto: l.amount, cuenta, centroCosto: null, tipoImpuesto };
-    });
+    return fromBreakdown
+      .map((l) => {
+        // La IA marca el kind explícito; si falta, caemos al regex sobre el label.
+        const kind = l.kind ?? (classifyPerceptionTipoImpuesto(l.label) === "PIV" ? "IVA" : "IIBB");
+        const { cuenta, tipoImpuesto } = perceptionAccountForKind(
+          kind,
+          ivaAccountCode,
+          iibbAccountCode,
+        );
+        return { monto: l.amount, cuenta, centroCosto: null, tipoImpuesto };
+      })
+      // Omitimos las que caen en un slot sin configurar (no mandar cuenta null al ERP).
+      .filter((line) => line.cuenta != null);
   }
 
   const perceptions = decimalToNumber(perceptionsAmount);

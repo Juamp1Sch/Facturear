@@ -228,6 +228,22 @@ describe("buildInvoiceJson percepciones (kind → PIV/PIB)", () => {
     );
   });
 
+  it("con desglose, omite la percepción cuyo slot no está configurado (no manda cuenta null)", () => {
+    const json = buildInvoiceJson({
+      ...perceptionBase,
+      perceptionIvaAccountCode: null,
+      perceptionLines: [{ label: "Perc. IVA", amount: 50, kind: "IVA" }],
+    });
+    assert.equal(
+      json.contable.some((l) => l.tipoImpuesto === "PIV"),
+      false,
+    );
+    assert.equal(
+      json.contable.some((l) => l.cuenta === null),
+      false,
+    );
+  });
+
   it("sin desglose y solo slot IVA configurado usa la cuenta IVA (PIV)", () => {
     const json = buildInvoiceJson({
       ...perceptionBase,

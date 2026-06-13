@@ -1,3 +1,8 @@
+-- NOTA (Post-Deploy): el modelo pasa de N cuentas de percepción a 2 slots fijos
+-- (IVA / IIBB). Los usuarios que tenían más de una cuenta del mismo tipo (p. ej.
+-- varias jurisdicciones IIBB) conservan SOLO la primera por código. Avisar que
+-- revisen /cuentas/asociar-impuestos tras el deploy.
+
 -- AlterTable: dos slots de percepción (IVA / IIBB) + flag para ignorar bonificaciones
 ALTER TABLE "tax_chart_account_settings"
   ADD COLUMN IF NOT EXISTS "perception_iva_chart_account_id" TEXT,
