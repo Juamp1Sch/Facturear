@@ -190,13 +190,18 @@ Ver `.env.example` para la lista completa.
 
 ## API Routes
 
-Solo existen 3 — preferir Server Actions para mutaciones nuevas.
+Existen 5. **Regla:** Server Actions para mutaciones; API routes solo para lo que no encaja
+en una action — protocolo de Auth.js, servir binarios, y **export/descarga de archivos**
+(CSV/XLSX). Agregar un endpoint de export vía API route es un patrón válido del proyecto, no
+una violación de la convención.
 
 | Ruta | Archivo | Propósito |
 |------|---------|-----------|
 | `/api/auth/[...nextauth]` | `src/app/api/auth/[...nextauth]/route.ts` | Handlers de Auth.js |
 | `/api/files/[...key]` | `src/app/api/files/[...key]/route.ts` | Servir archivos (auth + key scopeada al usuario) |
-| `/api/history/export` | `src/app/api/history/export/route.ts` | Export CSV/XLSX |
+| `/api/history/export` | `src/app/api/history/export/route.ts` | Export CSV/XLSX de facturas |
+| `/api/suppliers/export` | `src/app/api/suppliers/export/route.ts` | `GET` → XLSX del maestro de proveedores (scopeado por `userId`) |
+| `/api/chart-accounts/export` | `src/app/api/chart-accounts/export/route.ts` | `GET` → XLSX del plan de cuentas activo (scopeado por `userId`) |
 
 ## Server Actions
 
