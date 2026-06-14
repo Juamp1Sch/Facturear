@@ -1,8 +1,7 @@
 import { resolveFechaFacturaForApi } from "@/lib/invoice-calendar-date";
 import { buildCodigoComprobante, parseDocumentKind } from "@/lib/comprobante-code";
-import { matchPerceptionLineToAccount, classifyPerceptionTipoImpuesto } from "@/lib/tax-line-match";
-import type { PerceptionChartAccount } from "@/lib/tax-chart-account";
-import type { TaxBreakdownLine } from "@/lib/schemas";
+import { classifyPerceptionTipoImpuesto } from "@/lib/tax-line-match";
+import type { PerceptionLine, TaxBreakdownLine } from "@/lib/schemas";
 import {
   computeGrossBasesByRate,
   groupVatLinesByRate,
@@ -112,40 +111,60 @@ function buildVatAndGravadoContableLines(
   return applyGravado21OnNetWhenVatI21(lines);
 }
 
+/** Resuelve cuenta y tipoImpuesto (PIV/PIB) de una percepción según su kind. */
+function perceptionAccountForKind(
+  kind: "IVA" | "IIBB",
+  ivaAccountCode: string | null,
+  iibbAccountCode: string | null,
+): { cuenta: string | null; tipoImpuesto: "PIV" | "PIB" } {
+  return kind === "IVA"
+    ? { cuenta: ivaAccountCode, tipoImpuesto: "PIV" }
+    : { cuenta: iibbAccountCode, tipoImpuesto: "PIB" };
+}
+
 function buildPerceptionContableLines(
   perceptionsAmount: string | null,
-  perceptionLines: TaxBreakdownLine[] | null | undefined,
-  perceptionsAccounts: PerceptionChartAccount[],
+  perceptionLines: PerceptionLine[] | null | undefined,
+  ivaAccountCode: string | null,
+  iibbAccountCode: string | null,
 ): ContableLine[] {
   const fromBreakdown = perceptionLines?.filter((l) => l.amount > 0) ?? [];
 
   if (fromBreakdown.length > 0) {
-    return fromBreakdown.map((l) => ({
-      monto: l.amount,
-      cuenta: matchPerceptionLineToAccount(l.label, perceptionsAccounts),
-      centroCosto: null,
-      tipoImpuesto: classifyPerceptionTipoImpuesto(l.label),
-    }));
+    return fromBreakdown
+      .map((l) => {
+        // La IA marca el kind explícito; si falta, caemos al regex sobre el label.
+        const kind = l.kind ?? (classifyPerceptionTipoImpuesto(l.label) === "PIV" ? "IVA" : "IIBB");
+        const { cuenta, tipoImpuesto } = perceptionAccountForKind(
+          kind,
+          ivaAccountCode,
+          iibbAccountCode,
+        );
+        return { monto: l.amount, cuenta, centroCosto: null, tipoImpuesto };
+      })
+      // Omitimos las que caen en un slot sin configurar (no mandar cuenta null al ERP).
+      .filter((line) => line.cuenta != null);
   }
 
   const perceptions = decimalToNumber(perceptionsAmount);
-  if (perceptions == null || perceptions <= 0 || perceptionsAccounts.length === 0) {
-    return [];
-  }
+  if (perceptions == null || perceptions <= 0) return [];
 
-  // Sin desglose: emitimos UNA sola línea con el total (no repartir entre
-  // cuentas, porque una factura puede tener solo PIB o solo PIV, no ambos).
-  // La cuenta y el tipo se deducen de la única cuenta asociada; con varias
-  // cuentas tomamos la primera (el desglose real define PIB/PIV cuando existe).
-  const account = perceptionsAccounts[0]!;
-  return [
-    {
-      monto: perceptions,
-      cuenta: account.code,
-      centroCosto: null,
-      tipoImpuesto: classifyPerceptionTipoImpuesto(account.name),
-    },
-  ];
+  // Sin desglose: una sola línea con el total. Si hay un solo slot configurado,
+  // lo usamos; si están ambos, asumimos IIBB (la percepción de IVA casi siempre
+  // viene itemizada, mientras que IIBB suele aparecer solo como total).
+  let kind: "IVA" | "IIBB";
+  if (ivaAccountCode && !iibbAccountCode) kind = "IVA";
+  else if (iibbAccountCode && !ivaAccountCode) kind = "IIBB";
+  else kind = "IIBB";
+
+  const { cuenta, tipoImpuesto } = perceptionAccountForKind(
+    kind,
+    ivaAccountCode,
+    iibbAccountCode,
+  );
+  if (!cuenta) return [];
+
+  return [{ monto: perceptions, cuenta, centroCosto: null, tipoImpuesto }];
 }
 
 /** Neto gravado 21% (G21) cuando hay línea de IVA I21 (ApiSigma ImportCompras). */
@@ -196,6 +215,7 @@ function buildPresupuestoContableLines(
   discountLines: TaxBreakdownLine[] | null | undefined,
   mainCuentaCode: string | null,
   bonificacionAccountCode: string | null,
+  ignoreBonificaciones: boolean,
 ): ContableLine[] {
   const amount = totalAmount ?? netAmount;
   const lines: ContableLine[] = [];
@@ -209,13 +229,15 @@ function buildPresupuestoContableLines(
     });
   }
 
-  lines.push(
-    ...buildBonificacionContableLines(
-      discountAmount,
-      discountLines,
-      bonificacionAccountCode,
-    ),
-  );
+  if (!ignoreBonificaciones) {
+    lines.push(
+      ...buildBonificacionContableLines(
+        discountAmount,
+        discountLines,
+        bonificacionAccountCode,
+      ),
+    );
+  }
 
   return lines;
 }
@@ -225,14 +247,16 @@ function buildContableLines(
   vatAmount: string | null,
   vatLines: TaxBreakdownLine[] | null | undefined,
   perceptionsAmount: string | null,
-  perceptionLines: TaxBreakdownLine[] | null | undefined,
+  perceptionLines: PerceptionLine[] | null | undefined,
   totalAmount: string | null,
   discountAmount: string | null,
   discountLines: TaxBreakdownLine[] | null | undefined,
   mainCuentaCode: string | null,
   vatCuentaCode: string | null,
-  perceptionsAccounts: PerceptionChartAccount[],
+  perceptionIvaAccountCode: string | null,
+  perceptionIibbAccountCode: string | null,
   bonificacionAccountCode: string | null,
+  ignoreBonificaciones: boolean,
   isPresupuesto: boolean,
 ): ContableLine[] {
   const net = decimalToNumber(netAmount);
@@ -246,6 +270,7 @@ function buildContableLines(
       discountLines,
       mainCuentaCode,
       bonificacionAccountCode,
+      ignoreBonificaciones,
     );
   }
 
@@ -260,7 +285,8 @@ function buildContableLines(
     ...buildPerceptionContableLines(
       perceptionsAmount,
       perceptionLines,
-      perceptionsAccounts,
+      perceptionIvaAccountCode,
+      perceptionIibbAccountCode,
     ),
   ];
 
@@ -273,13 +299,15 @@ function buildContableLines(
     });
   }
 
-  lines.push(
-    ...buildBonificacionContableLines(
-      discountAmount,
-      discountLines,
-      bonificacionAccountCode,
-    ),
-  );
+  if (!ignoreBonificaciones) {
+    lines.push(
+      ...buildBonificacionContableLines(
+        discountAmount,
+        discountLines,
+        bonificacionAccountCode,
+      ),
+    );
+  }
 
   return lines;
 }
@@ -297,14 +325,16 @@ export type InvoiceJsonSource = {
   vatAmount: string | null;
   vatLines?: TaxBreakdownLine[] | null;
   perceptionsAmount: string | null;
-  perceptionLines?: TaxBreakdownLine[] | null;
+  perceptionLines?: PerceptionLine[] | null;
   discountAmount?: string | null;
   discountLines?: TaxBreakdownLine[] | null;
   totalAmount: string | null;
   chartAccount: SerializedChartAccount | null;
   vatChartAccountCode?: string | null;
-  perceptionsAccounts?: PerceptionChartAccount[];
+  perceptionIvaAccountCode?: string | null;
+  perceptionIibbAccountCode?: string | null;
   bonificacionAccountCode?: string | null;
+  ignoreBonificaciones?: boolean;
   tipoMoneda?: string | null;
 };
 
@@ -327,8 +357,10 @@ export function buildInvoiceJson(invoice: InvoiceJsonSource): InvoiceJsonShape {
       invoice.discountLines,
       mainCuentaCode,
       invoice.vatChartAccountCode ?? null,
-      invoice.perceptionsAccounts ?? [],
+      invoice.perceptionIvaAccountCode ?? null,
+      invoice.perceptionIibbAccountCode ?? null,
       invoice.bonificacionAccountCode ?? null,
+      invoice.ignoreBonificaciones ?? false,
       isPresupuesto,
     ),
     sucursal: invoice.sucursal,

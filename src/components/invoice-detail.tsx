@@ -114,8 +114,10 @@ export function InvoiceDetail({
     totalAmount: invoice.totalAmount,
     chartAccount: invoice.chartAccount,
     vatChartAccountCode: taxChartAccounts.vatAccountCode,
-    perceptionsAccounts: taxChartAccounts.perceptionsAccounts,
+    perceptionIvaAccountCode: taxChartAccounts.perceptionIvaAccountCode,
+    perceptionIibbAccountCode: taxChartAccounts.perceptionIibbAccountCode,
     bonificacionAccountCode: taxChartAccounts.bonificacionAccountCode,
+    ignoreBonificaciones: taxChartAccounts.ignoreBonificaciones,
     tipoMoneda: invoice.tipoMoneda,
   });
 
@@ -181,7 +183,11 @@ export function InvoiceDetail({
 
         <InvoiceExtractedFields
           invoice={invoice}
-          perceptionAccountCount={taxChartAccounts.perceptionsAccounts.length}
+          perceptionAccountCount={
+            (taxChartAccounts.perceptionIvaAccountCode ? 1 : 0) +
+            (taxChartAccounts.perceptionIibbAccountCode ? 1 : 0)
+          }
+          ignoreBonificaciones={taxChartAccounts.ignoreBonificaciones}
         />
       </div>
 

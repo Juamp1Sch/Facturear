@@ -195,8 +195,7 @@ public/                     # Static assets
 | `SupplierAlias` | Learned name → supplier code mappings |
 | `ChartAccount` | Imported chart of accounts |
 | `SupplierChartAccountLink` | Supplier → account association |
-| `TaxChartAccountSettings` | VAT account link |
-| `TaxChartAccountPerceptionLink` | Perception account links |
+| `TaxChartAccountSettings` | VAT, perception-IVA (PIV), perception-IIBB (PIB) and bonificación account links + "ignore bonificaciones" flag |
 | `IntegrationConfig` | Per-user external ERP API URL + token |
 | `CuitEmpresa` / `CuitSucursal` | CUIT → empresa/sucursal mappings |
 | `Correction` | Audit trail of manual field edits on invoices |

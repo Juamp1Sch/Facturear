@@ -235,7 +235,7 @@ Full schema: [`prisma/schema.prisma`](prisma/schema.prisma)
 - **`Supplier`** — per-user master (`@@unique([userId, code])`).
 - **`ChartAccount`** — per-user plan (`@@unique([userId, code])`).
 - **`SupplierChartAccountLink`** — one chart account per supplier (per user).
-- **`TaxChartAccountSettings`** / **`TaxChartAccountPerceptionLink`** — VAT and perception accounts for JSON export.
+- **`TaxChartAccountSettings`** — VAT, perception-IVA (PIV), perception-IIBB (PIB) and bonificación accounts (+ "ignore bonificaciones" flag) for JSON export.
 - **`IntegrationConfig`** — external API URL + token per user.
 - **`CuitEmpresa`** / **`CuitSucursal`** — empresa/sucursal options per issuer CUIT.
 - **`Correction`** — audit model (schema present; full audit UI still pending).
@@ -603,7 +603,7 @@ Esquema completo: [`prisma/schema.prisma`](prisma/schema.prisma)
 - **`Supplier`** — maestro por usuario (`@@unique([userId, code])`).
 - **`ChartAccount`** — plan por usuario (`@@unique([userId, code])`).
 - **`SupplierChartAccountLink`** — una cuenta del plan por proveedor (por usuario).
-- **`TaxChartAccountSettings`** / **`TaxChartAccountPerceptionLink`** — cuentas de IVA y percepciones para export JSON.
+- **`TaxChartAccountSettings`** — cuentas de IVA, percepción IVA (PIV), percepción IIBB (PIB) y bonificación (+ flag "ignorar bonificaciones") para export JSON.
 - **`IntegrationConfig`** — URL + token de API externa por usuario.
 - **`CuitEmpresa`** / **`CuitSucursal`** — opciones de empresa/sucursal por CUIT emisor.
 - **`Correction`** — modelo de auditoría (en esquema; UI de historial de correcciones pendiente).

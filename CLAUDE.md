@@ -145,8 +145,7 @@ scripts/                    # Scripts de mantenimiento / dev
 | `SupplierAlias` | Mapeos aprendidos nombre → código de proveedor |
 | `ChartAccount` | Plan de cuentas importado |
 | `SupplierChartAccountLink` | Asociación proveedor → cuenta |
-| `TaxChartAccountSettings` | Cuenta de IVA |
-| `TaxChartAccountPerceptionLink` | Cuentas de percepciones |
+| `TaxChartAccountSettings` | Cuentas de IVA, percepción IVA (PIV) y percepción IIBB (PIB), cuenta de bonificación y flag "ignorar bonificaciones" |
 | `IntegrationConfig` | URL + token de API ERP externa, por usuario |
 | `CuitEmpresa` / `CuitSucursal` | Mapeos CUIT → empresa/sucursal |
 | `Correction` | Auditoría de ediciones manuales de campos en facturas |

@@ -23,7 +23,6 @@ model User {
   chartAccounts         ChartAccount[]
   supplierChartAccounts SupplierChartAccountLink[]
   taxChartAccountSettings TaxChartAccountSettings?
-  taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
   storedFiles           StoredFile[]
   integrationConfig     IntegrationConfig?
   cuitEmpresas           CuitEmpresa[]
@@ -173,7 +172,8 @@ model ChartAccount {
   supplierLinks SupplierChartAccountLink[]
   vatTaxSettings                TaxChartAccountSettings[]           @relation("VatChartAccount")
   bonificacionTaxSettings       TaxChartAccountSettings[]           @relation("BonificacionChartAccount")
-  taxChartAccountPerceptionLinks TaxChartAccountPerceptionLink[]
+  perceptionIvaTaxSettings      TaxChartAccountSettings[]           @relation("PerceptionIvaChartAccount")
+  perceptionIibbTaxSettings     TaxChartAccountSettings[]           @relation("PerceptionIibbChartAccount")
   createdAt     DateTime                   @default(now()) @map("created_at")
   updatedAt     DateTime                   @updatedAt @map("updated_at")
 
@@ -189,22 +189,15 @@ model TaxChartAccountSettings {
   vatChartAccount   ChartAccount? @relation("VatChartAccount", fields: [vatChartAccountId], references: [id], onDelete: SetNull)
   bonificacionChartAccountId String?       @map("bonificacion_chart_account_id")
   bonificacionChartAccount   ChartAccount? @relation("BonificacionChartAccount", fields: [bonificacionChartAccountId], references: [id], onDelete: SetNull)
+  perceptionIvaChartAccountId String?      @map("perception_iva_chart_account_id")
+  perceptionIvaChartAccount   ChartAccount? @relation("PerceptionIvaChartAccount", fields: [perceptionIvaChartAccountId], references: [id], onDelete: SetNull)
+  perceptionIibbChartAccountId String?     @map("perception_iibb_chart_account_id")
+  perceptionIibbChartAccount   ChartAccount? @relation("PerceptionIibbChartAccount", fields: [perceptionIibbChartAccountId], references: [id], onDelete: SetNull)
+  ignoreBonificaciones Boolean  @default(false) @map("ignore_bonificaciones")
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
   @@map("tax_chart_account_settings")
-}
-
-model TaxChartAccountPerceptionLink {
-  id             String       @id @default(cuid())
-  userId         String       @map("user_id")
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chartAccountId String       @map("chart_account_id")
-  chartAccount   ChartAccount @relation(fields: [chartAccountId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now()) @map("created_at")
-
-  @@unique([userId, chartAccountId])
-  @@map("tax_chart_account_perception_links")
 }
 
 model SupplierChartAccountLink {

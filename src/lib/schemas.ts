@@ -13,6 +13,18 @@ export const taxBreakdownLineSchema = z.object({
 
 export type TaxBreakdownLine = z.infer<typeof taxBreakdownLineSchema>;
 
+/** Renglón de percepción con su tipo contable explícito (IVA→PIV, IIBB→PIB). */
+export const perceptionLineSchema = taxBreakdownLineSchema.extend({
+  kind: z
+    .enum(["IVA", "IIBB"])
+    .nullable()
+    .describe(
+      "Tipo de la percepción: IVA (percepción de IVA → PIV) o IIBB (percepción de Ingresos Brutos → PIB). Clasificá por el CONCEPTO del renglón, NO por el título de la sección: un 'Perc. IVA' que figura dentro de un bloque titulado 'PERCEPCIONES IIBB' es IVA. null solo si es imposible determinarlo.",
+    ),
+});
+
+export type PerceptionLine = z.infer<typeof perceptionLineSchema>;
+
 /** Structured extraction from OCR text (Argentina-style invoices). */
 export const invoiceExtractionSchema = z.object({
   provider: z
@@ -94,10 +106,10 @@ export const invoiceExtractionSchema = z.object({
       "Total de percepciones impositivas (IIBB, percepción IVA, etc.). Debe coincidir con la suma de perception_lines si las devolvés.",
     ),
   perception_lines: z
-    .array(taxBreakdownLineSchema)
+    .array(perceptionLineSchema)
     .nullable()
     .describe(
-      "Cada percepción por separado (IIBB, percepción IVA, etc.) con su importe. null si no hay percepciones.",
+      "Cada percepción por separado con su importe y su kind (IVA o IIBB). Distinguí percepción de IVA (kind 'IVA') de percepción de Ingresos Brutos (kind 'IIBB') por el concepto del renglón. null si no hay percepciones.",
     ),
   discount_amount: z
     .number()
@@ -173,9 +185,11 @@ export const amountsSupplementSchema = z.object({
       "Segunda aparición de percepciones IIBB en la caja 'Saldo en cuenta' / desglose inferior izquierdo ('Perc IIBB Buenos Aires', etc.). Debe coincidir con perceptions_amount; si difieren, devolvé ambos tal cual los leés.",
     ),
   perception_lines: z
-    .array(taxBreakdownLineSchema)
+    .array(perceptionLineSchema)
     .nullable()
-    .describe("Desglose de percepciones si aparece en el recuadro."),
+    .describe(
+      "Desglose de percepciones si aparece en el recuadro, cada una con su kind (IVA o IIBB).",
+    ),
   total_amount: z
     .number()
     .nullable()

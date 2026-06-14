@@ -10,8 +10,10 @@ import { prisma } from "@/lib/db";
 export type TaxAssociationFormData = {
   accounts: { id: string; code: string; name: string; type: string | null }[];
   vatChartAccountId: string | null;
-  perceptionChartAccountIds: string[];
+  perceptionIvaChartAccountId: string | null;
+  perceptionIibbChartAccountId: string | null;
   bonificacionChartAccountId: string | null;
+  ignoreBonificaciones: boolean;
 };
 
 export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFormData> {
@@ -19,8 +21,10 @@ export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFo
     return {
       accounts: [],
       vatChartAccountId: null,
-      perceptionChartAccountIds: [],
+      perceptionIvaChartAccountId: null,
+      perceptionIibbChartAccountId: null,
       bonificacionChartAccountId: null,
+      ignoreBonificaciones: false,
     };
   }
 
@@ -30,7 +34,7 @@ export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFo
   }
   const userId = session.user.id;
 
-  const [accounts, settings, perceptionLinks] = await Promise.all([
+  const [accounts, settings] = await Promise.all([
     prisma.chartAccount.findMany({
       where: { userId, active: true },
       select: { id: true, code: true, name: true, type: true },
@@ -40,21 +44,21 @@ export async function getTaxChartAssociationFormData(): Promise<TaxAssociationFo
       where: { userId },
       select: {
         vatChartAccountId: true,
+        perceptionIvaChartAccountId: true,
+        perceptionIibbChartAccountId: true,
         bonificacionChartAccountId: true,
+        ignoreBonificaciones: true,
       },
-    }),
-    prisma.taxChartAccountPerceptionLink.findMany({
-      where: { userId },
-      orderBy: { chartAccount: { code: "asc" } },
-      select: { chartAccountId: true },
     }),
   ]);
 
   return {
     accounts,
     vatChartAccountId: settings?.vatChartAccountId ?? null,
-    perceptionChartAccountIds: perceptionLinks.map((l) => l.chartAccountId),
+    perceptionIvaChartAccountId: settings?.perceptionIvaChartAccountId ?? null,
+    perceptionIibbChartAccountId: settings?.perceptionIibbChartAccountId ?? null,
     bonificacionChartAccountId: settings?.bonificacionChartAccountId ?? null,
+    ignoreBonificaciones: settings?.ignoreBonificaciones ?? false,
   };
 }
 
@@ -74,74 +78,71 @@ export async function saveTaxChartAccountSettings(
   const userId = session.user.id;
 
   const vatChartAccountId = String(formData.get("vatChartAccountId") ?? "").trim();
+  const perceptionIvaChartAccountId = String(
+    formData.get("perceptionIvaChartAccountId") ?? "",
+  ).trim();
+  const perceptionIibbChartAccountId = String(
+    formData.get("perceptionIibbChartAccountId") ?? "",
+  ).trim();
   const bonificacionChartAccountId = String(
     formData.get("bonificacionChartAccountId") ?? "",
   ).trim();
+  const ignoreBonificaciones = formData.get("ignoreBonificaciones") === "on";
 
-  const perceptionIdsRaw = formData
-    .getAll("perceptionsChartAccountIds")
-    .map((v) => String(v).trim())
-    .filter(Boolean);
-  const perceptionIds = [...new Set(perceptionIdsRaw)];
-
-  if (vatChartAccountId) {
-    const vatAccount = await prisma.chartAccount.findFirst({
-      where: { id: vatChartAccountId, userId, active: true },
+  // Valida que cada cuenta elegida exista, esté activa y sea del usuario.
+  const validateAccount = async (id: string, label: string): Promise<string | null> => {
+    if (!id) return null;
+    const account = await prisma.chartAccount.findFirst({
+      where: { id, userId, active: true },
       select: { id: true },
     });
-    if (!vatAccount) {
-      return { ok: false, error: "La cuenta de impuestos (IVA) no es válida." };
-    }
-  }
+    return account ? null : `La cuenta de ${label} no es válida.`;
+  };
 
-  if (bonificacionChartAccountId) {
-    const bonificacionAccount = await prisma.chartAccount.findFirst({
-      where: { id: bonificacionChartAccountId, userId, active: true },
-      select: { id: true },
-    });
-    if (!bonificacionAccount) {
-      return { ok: false, error: "La cuenta de bonificación no es válida." };
-    }
-  }
-
-  if (perceptionIds.length > 0) {
-    const found = await prisma.chartAccount.findMany({
-      where: { userId, active: true, id: { in: perceptionIds } },
-      select: { id: true },
-    });
-    if (found.length !== perceptionIds.length) {
-      return { ok: false, error: "Una o más cuentas de percepciones no son válidas." };
-    }
+  for (const [id, label] of [
+    [vatChartAccountId, "impuestos (IVA)"],
+    [perceptionIvaChartAccountId, "percepción IVA"],
+    [perceptionIibbChartAccountId, "percepción IIBB"],
+    [bonificacionChartAccountId, "bonificación"],
+  ] as const) {
+    const error = await validateAccount(id, label);
+    if (error) return { ok: false, error };
   }
 
   const vatId = vatChartAccountId || null;
+  const perceptionIvaId = perceptionIvaChartAccountId || null;
+  const perceptionIibbId = perceptionIibbChartAccountId || null;
   const bonificacionId = bonificacionChartAccountId || null;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.taxChartAccountPerceptionLink.deleteMany({ where: { userId } });
-    if (perceptionIds.length > 0) {
-      await tx.taxChartAccountPerceptionLink.createMany({
-        data: perceptionIds.map((chartAccountId) => ({ userId, chartAccountId })),
-      });
-    }
+  const allEmpty =
+    !vatId &&
+    !perceptionIvaId &&
+    !perceptionIibbId &&
+    !bonificacionId &&
+    !ignoreBonificaciones;
 
-    if (!vatId && perceptionIds.length === 0 && !bonificacionId) {
-      await tx.taxChartAccountSettings.deleteMany({ where: { userId } });
-    } else {
-      await tx.taxChartAccountSettings.upsert({
-        where: { userId },
-        create: {
-          userId,
-          vatChartAccountId: vatId,
-          bonificacionChartAccountId: bonificacionId,
-        },
-        update: {
-          vatChartAccountId: vatId,
-          bonificacionChartAccountId: bonificacionId,
-        },
-      });
-    }
-  });
+  if (allEmpty) {
+    await prisma.taxChartAccountSettings.deleteMany({ where: { userId } });
+  } else {
+    await prisma.taxChartAccountSettings.upsert({
+      where: { userId },
+      create: {
+        userId,
+        vatChartAccountId: vatId,
+        perceptionIvaChartAccountId: perceptionIvaId,
+        perceptionIibbChartAccountId: perceptionIibbId,
+        bonificacionChartAccountId: bonificacionId,
+        ignoreBonificaciones,
+      },
+      update: {
+        vatChartAccountId: vatId,
+        perceptionIvaChartAccountId: perceptionIvaId,
+        perceptionIibbChartAccountId: perceptionIibbId,
+        bonificacionChartAccountId: bonificacionId,
+        ignoreBonificaciones,
+      },
+    });
+  }
 
   revalidatePath("/cuentas/asociar-impuestos");
   revalidatePath("/cuentas");
