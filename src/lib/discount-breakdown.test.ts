@@ -60,6 +60,7 @@ describe("enrichExtractedDiscounts", () => {
         discount_amount: 999,
         total_amount: null,
         chart_account_code: null,
+        exchange_rate: null,
         confidence: 0.9,
       },
       {
@@ -97,6 +98,7 @@ describe("enrichExtractedDiscounts", () => {
       discount_amount: 1227.55,
       total_amount: 1546.72,
       chart_account_code: null,
+      exchange_rate: null,
       confidence: 0.9,
     };
 
@@ -135,6 +137,7 @@ describe("enrichExtractedDiscounts", () => {
       discount_amount: 115_277.44,
       total_amount: 1_637_227.87,
       chart_account_code: null,
+      exchange_rate: null,
       confidence: 0.9,
     });
 
@@ -172,6 +175,7 @@ describe("enrichExtractedDiscounts", () => {
         discount_amount: null,
         total_amount: 10_394_717.77,
         chart_account_code: null,
+        exchange_rate: null,
         confidence: 0.9,
       },
       {

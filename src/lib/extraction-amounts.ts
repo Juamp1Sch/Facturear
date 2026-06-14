@@ -375,6 +375,13 @@ export async function finalizeExtractedAmounts(
     clearPerceptionLines: correctedField?.includes("perceptions") ?? false,
   });
 
+  // El recorte ampliado del pie lee la letra chica (incl. el tipo de cambio fiscal)
+  // mucho más nítido que la primera pasada sobre la imagen completa: si lo trae, pisa.
+  const finalExtracted =
+    supplement?.exchange_rate != null
+      ? { ...current, exchange_rate: supplement.exchange_rate }
+      : current;
+
   return {
     netAmount: fields.net,
     vatAmount: fields.vat,
@@ -384,6 +391,6 @@ export async function finalizeExtractedAmounts(
     amountsDiscrepancy: reconcile.reconciled ? null : reconcile.discrepancy,
     amountsAlgebraicallyDerived: algebraicallyDerived,
     correctedField: correctedField?.length ? correctedField : null,
-    extracted: current,
+    extracted: finalExtracted,
   };
 }

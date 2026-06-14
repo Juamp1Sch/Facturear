@@ -54,7 +54,12 @@ import {
 import { parseAiInvoiceDate } from "@/lib/invoice-calendar-date";
 import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
 import { prisma } from "@/lib/db";
-import { parseTipoMonedaForStorage } from "@/lib/tipo-moneda";
+import {
+  isUsdTipoMoneda,
+  parseTipoMonedaForStorage,
+  TIPO_MONEDA_USD,
+} from "@/lib/tipo-moneda";
+import { convertAiPayloadToArs, scaleAmount } from "@/lib/currency-convert";
 import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
 import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
@@ -393,6 +398,7 @@ async function applyExtractionToInvoice(
       invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(resolvedExtracted.invoice_number),
       invoiceType: resolvedExtracted.invoice_type,
       invoiceDate,
+      exchangeRate: exchangeRateFromExtraction(resolvedExtracted.exchange_rate),
       netAmount:
         finalized.netAmount != null
           ? new Prisma.Decimal(finalized.netAmount)
@@ -797,6 +803,7 @@ export async function uploadInvoice(formData: FormData) {
         ),
         invoiceType: resolvedExtracted.invoice_type,
         invoiceDate,
+        exchangeRate: exchangeRateFromExtraction(resolvedExtracted.exchange_rate),
         netAmount:
           finalized.netAmount != null
             ? new Prisma.Decimal(finalized.netAmount)
@@ -1012,6 +1019,10 @@ export async function updateInvoiceExtractedFields(
   if (existing.status === "PROCESSING") {
     return { ok: false, error: "La factura sigue procesándose." };
   }
+  // Sin lock por conversión: tras convertir a ARS el usuario puede seguir editando
+  // todos los campos extraídos, incluidos neto/IVA/percepciones/total, para corregir
+  // errores mínimos sin deshacer la conversión. Revertir sigue usando conversion_backup
+  // (vuelve al snapshot pre-conversión, no a correcciones manuales posteriores).
 
   const providerName = formText(formData.get("providerName"));
   const cuitRaw = formData.get("providerCuit");
@@ -1302,6 +1313,8 @@ export async function setInvoiceTipoMoneda(
   if (existing.status === "PROCESSING") {
     return { ok: false, error: "La factura sigue procesándose." };
   }
+  const convertedLock = conversionLockError(existing.conversionBackup);
+  if (convertedLock) return convertedLock;
 
   const tipoMoneda = parseTipoMonedaForStorage(formText(formData.get("tipoMoneda")));
 
@@ -1322,6 +1335,283 @@ export async function setInvoiceTipoMoneda(
   revalidatePath("/upload");
   revalidatePath(`/history/${invoiceId}`);
   return { ok: true, invoice: updated };
+}
+
+/** Recarga la factura serializada y revalida las rutas que la muestran. */
+async function reloadInvoiceResult(
+  userId: string,
+  invoiceId: string,
+): Promise<UpdateInvoiceFieldsResult> {
+  const [updated] = await loadSerializedBatchInvoices(userId, [invoiceId]);
+  if (!updated) {
+    return { ok: false, error: "No se pudo cargar la factura actualizada." };
+  }
+  revalidatePath("/history");
+  revalidatePath("/proveedores");
+  revalidatePath("/upload");
+  revalidatePath(`/history/${invoiceId}`);
+  return { ok: true, invoice: updated };
+}
+
+/** null/undefined → DB NULL; valor → JSON. Para columnas Json? en updates. */
+function jsonForUpdate(
+  value: unknown,
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return value == null ? Prisma.DbNull : (value as Prisma.InputJsonValue);
+}
+
+const INVOICE_CONVERTED_LOCK_MESSAGE =
+  "Revertí la conversión primero.";
+
+/** Bloquea acciones que romperían el estado USD→ARS (moneda, TC, reproceso).
+ *  updateInvoiceExtractedFields NO usa este lock: importes y demás campos siguen
+ *  editables tras convertir (ajustes finos en ARS). Solo moneda/TC/reproceso exigen revertir. */
+function conversionLockError(
+  conversionBackup: unknown,
+): { ok: false; error: string } | null {
+  if (conversionBackup != null) {
+    return { ok: false, error: INVOICE_CONVERTED_LOCK_MESSAGE };
+  }
+  return null;
+}
+
+/** Persiste el TC de la IA; valores ≤ 0 o inválidos se descartan. */
+function exchangeRateFromExtraction(
+  rate: number | null | undefined,
+): Prisma.Decimal | null {
+  if (rate == null || rate <= 0 || Number.isNaN(rate)) return null;
+  return new Prisma.Decimal(rate);
+}
+
+/** Snapshot guardado en conversion_backup para poder revertir la conversión. */
+type ConversionBackup = {
+  netAmount: string | null;
+  vatAmount: string | null;
+  perceptionsAmount: string | null;
+  totalAmount: string | null;
+  aiPayload: unknown;
+  tipoMoneda: string | null;
+};
+
+const CONVERSION_BACKUP_INVALID_MESSAGE =
+  "Backup de conversión inválido; contactá soporte.";
+
+function parseBackupAmount(value: unknown): string | null | "invalid" {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    try {
+      new Prisma.Decimal(trimmed);
+      return trimmed;
+    } catch {
+      return "invalid";
+    }
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "invalid";
+}
+
+function parseConversionBackup(
+  raw: unknown,
+):
+  | { ok: true; backup: ConversionBackup }
+  | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const o = raw as Record<string, unknown>;
+
+  const netAmount = parseBackupAmount(o.netAmount);
+  if (netAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const vatAmount = parseBackupAmount(o.vatAmount);
+  if (vatAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const perceptionsAmount = parseBackupAmount(o.perceptionsAmount);
+  if (perceptionsAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const totalAmount = parseBackupAmount(o.totalAmount);
+  if (totalAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  const tipoMonedaRaw = o.tipoMoneda;
+  if (
+    tipoMonedaRaw !== null &&
+    tipoMonedaRaw !== undefined &&
+    typeof tipoMonedaRaw !== "string"
+  ) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  if (!("aiPayload" in o)) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  return {
+    ok: true,
+    backup: {
+      netAmount,
+      vatAmount,
+      perceptionsAmount,
+      totalAmount,
+      aiPayload: o.aiPayload ?? null,
+      tipoMoneda:
+        typeof tipoMonedaRaw === "string" ? tipoMonedaRaw : null,
+    },
+  };
+}
+
+/** Carga + valida que la factura sea del usuario y esté lista para editar. */
+async function loadEditableInvoice(userId: string, invoiceId: string | null) {
+  if (!invoiceId) {
+    return { ok: false as const, error: "Falta el identificador de la factura." };
+  }
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId },
+  });
+  if (!invoice) return { ok: false as const, error: "No se encontró la factura." };
+  if (invoice.status === "PROCESSING") {
+    return { ok: false as const, error: "La factura sigue procesándose." };
+  }
+  return { ok: true as const, invoice };
+}
+
+export async function setInvoiceExchangeRate(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  const loaded = await loadEditableInvoice(session.user.id, invoiceId);
+  if (!loaded.ok) return loaded;
+  const convertedLock = conversionLockError(loaded.invoice.conversionBackup);
+  if (convertedLock) return convertedLock;
+
+  let exchangeRate: Prisma.Decimal | null;
+  try {
+    exchangeRate = parseMoneyFromForm(formData.get("exchangeRate"));
+  } catch {
+    return {
+      ok: false,
+      error: "Tipo de cambio inválido: usá un número (ej. 1460 o 1.460,00).",
+    };
+  }
+  if (exchangeRate != null && exchangeRate.lte(0)) {
+    return { ok: false, error: "El tipo de cambio debe ser mayor a 0." };
+  }
+
+  await prisma.invoice.update({
+    where: { id: loaded.invoice.id },
+    data: { exchangeRate },
+  });
+  return reloadInvoiceResult(session.user.id, loaded.invoice.id);
+}
+
+export async function convertInvoiceToArs(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  const loaded = await loadEditableInvoice(session.user.id, invoiceId);
+  if (!loaded.ok) return loaded;
+  const invoice = loaded.invoice;
+
+  if (!isUsdTipoMoneda(invoice.tipoMoneda)) {
+    return { ok: false, error: "La conversión solo aplica a facturas en USD." };
+  }
+  if (invoice.conversionBackup != null) {
+    return { ok: false, error: "La factura ya fue convertida a ARS." };
+  }
+  const rate = invoice.exchangeRate != null ? invoice.exchangeRate.toNumber() : null;
+  if (rate == null || rate <= 0) {
+    return { ok: false, error: "Cargá un tipo de cambio válido antes de convertir." };
+  }
+
+  const backup: ConversionBackup = {
+    netAmount: invoice.netAmount?.toString() ?? null,
+    vatAmount: invoice.vatAmount?.toString() ?? null,
+    perceptionsAmount: invoice.perceptionsAmount?.toString() ?? null,
+    totalAmount: invoice.totalAmount?.toString() ?? null,
+    aiPayload: invoice.aiPayload ?? null,
+    tipoMoneda: invoice.tipoMoneda ?? null,
+  };
+
+  const scaleCol = (d: Prisma.Decimal | null) =>
+    d != null ? new Prisma.Decimal(scaleAmount(d.toNumber(), rate)) : null;
+
+  await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      netAmount: scaleCol(invoice.netAmount),
+      vatAmount: scaleCol(invoice.vatAmount),
+      perceptionsAmount: scaleCol(invoice.perceptionsAmount),
+      totalAmount: scaleCol(invoice.totalAmount),
+      aiPayload: jsonForUpdate(convertAiPayloadToArs(invoice.aiPayload, rate)),
+      tipoMoneda: null,
+      conversionBackup: jsonForUpdate(backup),
+    },
+  });
+  return reloadInvoiceResult(session.user.id, invoice.id);
+}
+
+export async function revertInvoiceConversion(
+  formData: FormData,
+): Promise<UpdateInvoiceFieldsResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Base de datos no configurada." };
+  }
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/iniciar-sesion");
+  }
+
+  const invoiceId = formText(formData.get("invoiceId"));
+  const loaded = await loadEditableInvoice(session.user.id, invoiceId);
+  if (!loaded.ok) return loaded;
+  const invoice = loaded.invoice;
+
+  if (invoice.conversionBackup == null) {
+    return { ok: false, error: "La factura no tiene una conversión para revertir." };
+  }
+  const parsedBackup = parseConversionBackup(invoice.conversionBackup);
+  if (!parsedBackup.ok) return parsedBackup;
+  const backup = parsedBackup.backup;
+  const toDecimal = (v: string | null) =>
+    v != null ? new Prisma.Decimal(v) : null;
+
+  await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      netAmount: toDecimal(backup.netAmount),
+      vatAmount: toDecimal(backup.vatAmount),
+      perceptionsAmount: toDecimal(backup.perceptionsAmount),
+      totalAmount: toDecimal(backup.totalAmount),
+      aiPayload: jsonForUpdate(backup.aiPayload),
+      tipoMoneda: backup.tipoMoneda ?? TIPO_MONEDA_USD,
+      conversionBackup: Prisma.DbNull,
+    },
+  });
+  return reloadInvoiceResult(session.user.id, invoice.id);
 }
 
 export type ReprocessInvoiceResult =
@@ -1348,6 +1638,8 @@ export async function reprocessInvoice(
   if (!existing) {
     return { ok: false, error: "No se encontró la factura." };
   }
+  const convertedLock = conversionLockError(existing.conversionBackup);
+  if (convertedLock) return convertedLock;
 
   const previousStatus = existing.status;
   const previousAiPayload = existing.aiPayload;

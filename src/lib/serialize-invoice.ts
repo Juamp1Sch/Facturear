@@ -30,6 +30,8 @@ type InvoiceWithRelations = {
   documentKind: string | null;
   documentClass: string | null;
   tipoMoneda: string | null;
+  exchangeRate: { toString(): string } | null;
+  conversionBackup: unknown;
   afipCode: string | null;
   fiscalAuthType: string | null;
   fiscalAuthCode: string | null;
@@ -79,6 +81,8 @@ export async function serializeInvoiceForBatch(
   );
 
   const base = JSON.parse(JSON.stringify(invoice)) as Record<string, unknown>;
+  // El snapshot de conversión es estado interno; no se expone al cliente.
+  delete base.conversionBackup;
   const cuitKey = normalizeCuitKey(invoice.providerCuit);
   const cuitEmpresaOptions =
     cuitKey && cuitOptions
@@ -107,6 +111,8 @@ export async function serializeInvoiceForBatch(
     netAmount: invoice.netAmount?.toString() ?? null,
     vatAmount: invoice.vatAmount?.toString() ?? null,
     perceptionsAmount: invoice.perceptionsAmount?.toString() ?? null,
+    exchangeRate: invoice.exchangeRate?.toString() ?? null,
+    isConverted: invoice.conversionBackup != null,
     destinationUploadedAt: invoice.destinationUploadedAt
       ? invoice.destinationUploadedAt.toISOString()
       : null,

@@ -6,8 +6,11 @@ import { useFormStatus } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  convertInvoiceToArs,
   reprocessInvoice,
+  revertInvoiceConversion,
   setInvoiceEmpresaSucursal,
+  setInvoiceExchangeRate,
   setInvoiceTipoMoneda,
   updateInvoiceExtractedFields,
 } from "@/actions/invoices";
@@ -130,6 +133,7 @@ export function InvoiceExtractedFields({
   );
   const [assocSaving, setAssocSaving] = useState(false);
   const [currencySaving, setCurrencySaving] = useState(false);
+  const [conversionSaving, setConversionSaving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [draftProviderName, setDraftProviderName] = useState(
     invoiceProp.providerName ?? "",
@@ -287,9 +291,57 @@ export function InvoiceExtractedFields({
     [invoice.id, onInvoiceUpdated, router],
   );
 
+  const persistExchangeRate = useCallback(
+    async (value: string) => {
+      setError(null);
+      const fd = new FormData();
+      fd.append("invoiceId", invoice.id);
+      fd.append("exchangeRate", value);
+      setConversionSaving(true);
+      try {
+        const res = await setInvoiceExchangeRate(fd);
+        if (res.ok) {
+          setDisplayInvoice(res.invoice);
+          onInvoiceUpdated?.(res.invoice);
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      } finally {
+        setConversionSaving(false);
+      }
+    },
+    [invoice.id, onInvoiceUpdated, router],
+  );
+
+  const runConversion = useCallback(
+    async (action: typeof convertInvoiceToArs) => {
+      setError(null);
+      const fd = new FormData();
+      fd.append("invoiceId", invoice.id);
+      setConversionSaving(true);
+      try {
+        const res = await action(fd);
+        if (res.ok) {
+          setDisplayInvoice(res.invoice);
+          onInvoiceUpdated?.(res.invoice);
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      } finally {
+        setConversionSaving(false);
+      }
+    },
+    [invoice.id, onInvoiceUpdated, router],
+  );
+
   const currencyValue = tipoMonedaToCurrencyValue(invoice.tipoMoneda);
 
+  // Tras convertir a ARS, Editar sigue habilitado (importes incluidos) para correcciones
+  // menores; solo moneda, TC y reproceso quedan bloqueados hasta Revertir.
   const canEdit = invoice.status !== "PROCESSING";
+  const canReprocess = canEdit && !invoice.isConverted;
 
   const openEdit = useCallback(() => {
     setDraftProviderName(displayInvoice.providerName ?? "");
@@ -367,8 +419,9 @@ export function InvoiceExtractedFields({
             los valores antes de usarlos en contabilidad.
           </CardDescription>
         </div>
-        {canEdit && !editing ? (
+        {!editing && (canEdit || canReprocess) ? (
           <div className="flex shrink-0 gap-2">
+            {canReprocess ? (
             <Button
               type="button"
               variant="outline"
@@ -382,6 +435,8 @@ export function InvoiceExtractedFields({
               />
               {reprocessing ? "Reprocesando…" : "Reprocesar"}
             </Button>
+            ) : null}
+            {canEdit ? (
             <Button
               type="button"
               variant="outline"
@@ -393,6 +448,7 @@ export function InvoiceExtractedFields({
               <Pencil className="size-3.5" />
               Editar
             </Button>
+            ) : null}
           </div>
         ) : null}
       </CardHeader>
@@ -591,7 +647,7 @@ export function InvoiceExtractedFields({
                 <span className="block text-sm font-medium">Moneda</span>
                 <CurrencyToggle
                   value={currencyValue}
-                  disabled={currencySaving}
+                  disabled={currencySaving || invoice.isConverted}
                   onSelect={persistTipoMoneda}
                 />
               </div>
@@ -861,11 +917,81 @@ export function InvoiceExtractedFields({
               <dd className="text-sm">
                 <CurrencyToggle
                   value={currencyValue}
-                  disabled={currencySaving}
+                  disabled={currencySaving || invoice.isConverted}
                   onSelect={persistTipoMoneda}
                 />
               </dd>
             </div>
+            {invoice.exchangeRate != null || currencyValue === "usd" ? (
+              <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
+                <dt className="text-sm font-medium text-muted-foreground">
+                  Tipo de Cambio
+                </dt>
+                <dd className="text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label="Tipo de cambio USD a ARS"
+                      key={`xr-${invoice.id}-${invoice.exchangeRate ?? ""}`}
+                      defaultValue={amountInputDefault(invoice.exchangeRate)}
+                      disabled={conversionSaving || invoice.isConverted}
+                      placeholder="0 o 1460"
+                      className="h-8 w-32"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim();
+                        if (next !== amountInputDefault(invoice.exchangeRate)) {
+                          void persistExchangeRate(next);
+                        }
+                      }}
+                    />
+                    <span
+                      className="inline-flex"
+                      title={
+                        invoice.isConverted
+                          ? "Volver a USD (deshace la conversión)."
+                          : currencyValue !== "usd"
+                            ? "Disponible solo para facturas con moneda USD."
+                            : invoice.exchangeRate == null
+                              ? "Cargá el tipo de cambio para poder convertir."
+                              : "Convierte los importes de USD a ARS con este tipo de cambio."
+                      }
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={invoice.isConverted ? "outline" : "default"}
+                        disabled={
+                          conversionSaving ||
+                          (!invoice.isConverted &&
+                            (currencyValue !== "usd" ||
+                              invoice.exchangeRate == null))
+                        }
+                        onClick={() =>
+                          void runConversion(
+                            invoice.isConverted
+                              ? revertInvoiceConversion
+                              : convertInvoiceToArs,
+                          )
+                        }
+                      >
+                        {conversionSaving
+                          ? "…"
+                          : invoice.isConverted
+                            ? "Revertir"
+                            : "Convertir"}
+                      </Button>
+                    </span>
+                  </div>
+                  {invoice.isConverted ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Importes convertidos a ARS. Podés revertir para volver a los
+                      valores en USD.
+                    </p>
+                  ) : null}
+                </dd>
+              </div>
+            ) : null}
             {!isPresupuesto ? (
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Clase (fiscal)</dt>
