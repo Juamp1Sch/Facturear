@@ -338,7 +338,10 @@ export function InvoiceExtractedFields({
 
   const currencyValue = tipoMonedaToCurrencyValue(invoice.tipoMoneda);
 
+  // Tras convertir a ARS, Editar sigue habilitado (importes incluidos) para correcciones
+  // menores; solo moneda, TC y reproceso quedan bloqueados hasta Revertir.
   const canEdit = invoice.status !== "PROCESSING";
+  const canReprocess = canEdit && !invoice.isConverted;
 
   const openEdit = useCallback(() => {
     setDraftProviderName(displayInvoice.providerName ?? "");
@@ -416,8 +419,9 @@ export function InvoiceExtractedFields({
             los valores antes de usarlos en contabilidad.
           </CardDescription>
         </div>
-        {canEdit && !editing ? (
+        {!editing && (canEdit || canReprocess) ? (
           <div className="flex shrink-0 gap-2">
+            {canReprocess ? (
             <Button
               type="button"
               variant="outline"
@@ -431,6 +435,8 @@ export function InvoiceExtractedFields({
               />
               {reprocessing ? "Reprocesando…" : "Reprocesar"}
             </Button>
+            ) : null}
+            {canEdit ? (
             <Button
               type="button"
               variant="outline"
@@ -442,6 +448,7 @@ export function InvoiceExtractedFields({
               <Pencil className="size-3.5" />
               Editar
             </Button>
+            ) : null}
           </div>
         ) : null}
       </CardHeader>
@@ -640,7 +647,7 @@ export function InvoiceExtractedFields({
                 <span className="block text-sm font-medium">Moneda</span>
                 <CurrencyToggle
                   value={currencyValue}
-                  disabled={currencySaving}
+                  disabled={currencySaving || invoice.isConverted}
                   onSelect={persistTipoMoneda}
                 />
               </div>
@@ -910,7 +917,7 @@ export function InvoiceExtractedFields({
               <dd className="text-sm">
                 <CurrencyToggle
                   value={currencyValue}
-                  disabled={currencySaving}
+                  disabled={currencySaving || invoice.isConverted}
                   onSelect={persistTipoMoneda}
                 />
               </dd>

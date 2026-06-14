@@ -398,10 +398,7 @@ async function applyExtractionToInvoice(
       invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(resolvedExtracted.invoice_number),
       invoiceType: resolvedExtracted.invoice_type,
       invoiceDate,
-      exchangeRate:
-        resolvedExtracted.exchange_rate != null
-          ? new Prisma.Decimal(resolvedExtracted.exchange_rate)
-          : null,
+      exchangeRate: exchangeRateFromExtraction(resolvedExtracted.exchange_rate),
       netAmount:
         finalized.netAmount != null
           ? new Prisma.Decimal(finalized.netAmount)
@@ -806,10 +803,7 @@ export async function uploadInvoice(formData: FormData) {
         ),
         invoiceType: resolvedExtracted.invoice_type,
         invoiceDate,
-        exchangeRate:
-          resolvedExtracted.exchange_rate != null
-            ? new Prisma.Decimal(resolvedExtracted.exchange_rate)
-            : null,
+        exchangeRate: exchangeRateFromExtraction(resolvedExtracted.exchange_rate),
         netAmount:
           finalized.netAmount != null
             ? new Prisma.Decimal(finalized.netAmount)
@@ -1025,6 +1019,10 @@ export async function updateInvoiceExtractedFields(
   if (existing.status === "PROCESSING") {
     return { ok: false, error: "La factura sigue procesándose." };
   }
+  // Sin lock por conversión: tras convertir a ARS el usuario puede seguir editando
+  // todos los campos extraídos, incluidos neto/IVA/percepciones/total, para corregir
+  // errores mínimos sin deshacer la conversión. Revertir sigue usando conversion_backup
+  // (vuelve al snapshot pre-conversión, no a correcciones manuales posteriores).
 
   const providerName = formText(formData.get("providerName"));
   const cuitRaw = formData.get("providerCuit");
@@ -1315,6 +1313,8 @@ export async function setInvoiceTipoMoneda(
   if (existing.status === "PROCESSING") {
     return { ok: false, error: "La factura sigue procesándose." };
   }
+  const convertedLock = conversionLockError(existing.conversionBackup);
+  if (convertedLock) return convertedLock;
 
   const tipoMoneda = parseTipoMonedaForStorage(formText(formData.get("tipoMoneda")));
 
@@ -1360,6 +1360,29 @@ function jsonForUpdate(
   return value == null ? Prisma.DbNull : (value as Prisma.InputJsonValue);
 }
 
+const INVOICE_CONVERTED_LOCK_MESSAGE =
+  "Revertí la conversión primero.";
+
+/** Bloquea acciones que romperían el estado USD→ARS (moneda, TC, reproceso).
+ *  updateInvoiceExtractedFields NO usa este lock: importes y demás campos siguen
+ *  editables tras convertir (ajustes finos en ARS). Solo moneda/TC/reproceso exigen revertir. */
+function conversionLockError(
+  conversionBackup: unknown,
+): { ok: false; error: string } | null {
+  if (conversionBackup != null) {
+    return { ok: false, error: INVOICE_CONVERTED_LOCK_MESSAGE };
+  }
+  return null;
+}
+
+/** Persiste el TC de la IA; valores ≤ 0 o inválidos se descartan. */
+function exchangeRateFromExtraction(
+  rate: number | null | undefined,
+): Prisma.Decimal | null {
+  if (rate == null || rate <= 0 || Number.isNaN(rate)) return null;
+  return new Prisma.Decimal(rate);
+}
+
 /** Snapshot guardado en conversion_backup para poder revertir la conversión. */
 type ConversionBackup = {
   netAmount: string | null;
@@ -1399,6 +1422,8 @@ export async function setInvoiceExchangeRate(
   const invoiceId = formText(formData.get("invoiceId"));
   const loaded = await loadEditableInvoice(session.user.id, invoiceId);
   if (!loaded.ok) return loaded;
+  const convertedLock = conversionLockError(loaded.invoice.conversionBackup);
+  if (convertedLock) return convertedLock;
 
   let exchangeRate: Prisma.Decimal | null;
   try {
@@ -1536,6 +1561,8 @@ export async function reprocessInvoice(
   if (!existing) {
     return { ok: false, error: "No se encontró la factura." };
   }
+  const convertedLock = conversionLockError(existing.conversionBackup);
+  if (convertedLock) return convertedLock;
 
   const previousStatus = existing.status;
   const previousAiPayload = existing.aiPayload;
