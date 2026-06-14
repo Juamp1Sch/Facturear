@@ -550,6 +550,7 @@ export function resolveDiscountBreakdown(
     discount_amount: null,
     total_amount: amountContext?.total_amount ?? null,
     chart_account_code: null,
+    exchange_rate: null,
     confidence: 0,
   };
 

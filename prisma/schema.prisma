@@ -74,6 +74,8 @@ model Invoice {
   fiscalAuthType      String?            @map("fiscal_auth_type")
   fiscalAuthCode      String?            @map("fiscal_auth_code")
   tipoMoneda          String?            @map("tipo_moneda")
+  exchangeRate        Decimal?           @map("exchange_rate") @db.Decimal(14, 4)
+  conversionBackup    Json?              @map("conversion_backup")
   status              InvoiceStatus      @default(PROCESSING)
   aiConfidence        Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")

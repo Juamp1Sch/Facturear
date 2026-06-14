@@ -135,6 +135,12 @@ export const invoiceExtractionSchema = z.object({
     .describe(
       "Código de cuenta del plan importado (columna Cuenta: ej. 1001 Efectivo, 2007 Galicia). Solo si hay plan cargado y hay señal en el comprobante.",
     ),
+  exchange_rate: z
+    .number()
+    .nullable()
+    .describe(
+      "Tipo de cambio USD→ARS impreso en el comprobante. Suele estar en el pie como 'Tipo de cambio de referencia US$ 1 = 1.415,00' o 'Exclusivamente para efectos fiscales el tipo de cambio de este documento es de USD 1 = $ 1.460,00'. Devolvé SOLO el número de pesos por dólar (ej. 1460). Formato argentino: 1.460,00 → 1460. null si el comprobante no trae tipo de cambio.",
+    ),
   confidence: z.number().min(0).max(1).describe("Confianza global 0-1"),
 });
 
@@ -194,6 +200,12 @@ export const amountsSupplementSchema = z.object({
     .number()
     .nullable()
     .describe("Total final del recuadro de totales."),
+  exchange_rate: z
+    .number()
+    .nullable()
+    .describe(
+      "Tipo de cambio USD→ARS impreso en la franja inferior/legal del comprobante (ej. 'Tipo de cambio de referencia US$ 1 = 1.415,00' o 'Exclusivamente para efectos fiscales el tipo de cambio de este documento es de USD 1 = $ 1.460,00'). Devolvé SOLO los pesos por dólar (1.460,00 → 1460), leyendo dígito por dígito. null si no figura en este recorte.",
+    ),
 });
 
 export type AmountsSupplement = z.infer<typeof amountsSupplementSchema>;

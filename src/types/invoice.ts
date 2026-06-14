@@ -36,6 +36,10 @@ export type SerializedInvoiceListItem = {
   documentKind: string | null;
   documentClass: string | null;
   tipoMoneda: string | null;
+  /** Tipo de cambio USD→ARS leído/cargado; null si no hay. */
+  exchangeRate: string | null;
+  /** true si la factura fue convertida USD→ARS (se puede revertir). */
+  isConverted: boolean;
   afipCode: string | null;
   fiscalAuthType: string | null;
   fiscalAuthCode: string | null;

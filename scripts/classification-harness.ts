@@ -26,6 +26,7 @@ function base(): InvoiceExtraction {
     discount_amount: null,
     discount_lines: null,
     chart_account_code: null,
+    exchange_rate: null,
     confidence: 0.9,
   };
 }

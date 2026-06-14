@@ -51,6 +51,7 @@ const EXTRACTION_RULES = `- Montos e importes (CRÍTICO — máxima precisión):
 - perceptions_amount: suma de los amount de perception_lines (que deben existir si esto es > 0), o el total de percepciones si por algún motivo no pudiste itemizar.
 - discount_lines: ARRAY con UN elemento por cada bonificación GLOBAL con importe > 0 (ej. filas "BONIFICACION GENERAL", "BONIFICACION ESPECIAL", "BONIFICACION ADICIONAL" repetidas — Jeluz). CRÍTICO: si hay 7 filas Jeluz, devolvé 7 objetos. NO incluyas: columna "Bon (%)" del detalle; renglones "DESCUENTO X %" del detalle si el Subtotal del pie ya los refleja (LIPO, SAP, etc.); rótulos sin importe (ej. "BONIFICACION EN MERCADERIAS"); Subtotal ni "Saldo en cuenta". Si neto+IVA+percepciones≈total y los descuentos solo aparecen en el detalle de ítems, discount_lines null.
 - discount_amount: suma de discount_lines. null si los descuentos ya están incluidos en net_amount/subtotal. NO sumes bonificaciones en el cuadre net+IVA+percepciones≈total.
+- exchange_rate: tipo de cambio USD→ARS si el comprobante lo trae (típicamente en el pie: "Tipo de cambio de referencia US$ 1 = 1.415,00" o "Exclusivamente para efectos fiscales el tipo de cambio de este documento es de USD 1 = $ 1.460,00"). Devolvé SOLO los pesos por dólar (1.460,00 → 1460). Leelo aunque los importes se devuelvan sin prefijo de moneda. null si no figura.
 Para el resto de campos: si un dato no está en el texto o no es legible en la imagen, devolvé null. Para "cuit", solo null si en la cabecera del emisor no hay ningún CUIT legible. confidence: qué tan seguro estás de los montos y el proveedor (0 a 1).`;
 
 const SYSTEM_PROMPT_TEXT = `Sos un asistente contable para Argentina. A partir del texto OCR de una factura de proveedor, extraé campos estructurados.
@@ -282,6 +283,7 @@ Buscá y devolvé SOLO estos importes:
 - perceptions_amount: total de percepciones del recuadro. OJO: el bloque suele titularse "PERCEPCIONES IIBB" con jurisdicciones (C.A.B.A., Bs.As., Tucumán, Misiones, Río Negro) en 0,00 y, dentro, un renglón "Perc. IVA" / "Perc. IVA no Cat." CON importe (ej. "Perc. IVA 3,00 % 53.385,12"). Ese importe es percepción de IVA, no de IIBB, aunque esté bajo ese título.
 - perceptions_amount_secondary: "Perc IIBB" / percepción IIBB en la caja "Saldo en cuenta" o desglose INFERIOR IZQUIERDO (si está visible). Debe coincidir con perceptions_amount; si leés valores distintos, devolvé ambos.
 - total_amount: total FINAL a pagar (Subtotal + IVA + percepciones). Puede figurar como "Total", "TOTAL NETO" o "Neto" en el pie — verificá que sea la suma, no el Subtotal.
+- exchange_rate: tipo de cambio USD→ARS de la letra chica legal del pie ("Tipo de cambio de referencia US$ 1 = 1.415,00" o "Exclusivamente para efectos fiscales el tipo de cambio de este documento es de USD 1 = $ 1.460,00"). Este recorte es de ALTA RESOLUCIÓN: leelo dígito por dígito con cuidado (6 vs 1 vs 0; ej. 1.460 no 1.410). Devolvé SOLO los pesos por dólar (1.460,00 → 1460). null si no aparece en este recorte.
 - Devolvé SIEMPRE net_amount y total_amount por separado si ambos están visibles, aunque el rótulo del total diga "TOTAL NETO" o "Neto".
 
 Reglas CRÍTICAS:
