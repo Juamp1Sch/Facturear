@@ -1393,6 +1393,81 @@ type ConversionBackup = {
   tipoMoneda: string | null;
 };
 
+const CONVERSION_BACKUP_INVALID_MESSAGE =
+  "Backup de conversión inválido; contactá soporte.";
+
+function parseBackupAmount(value: unknown): string | null | "invalid" {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    try {
+      new Prisma.Decimal(trimmed);
+      return trimmed;
+    } catch {
+      return "invalid";
+    }
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "invalid";
+}
+
+function parseConversionBackup(
+  raw: unknown,
+):
+  | { ok: true; backup: ConversionBackup }
+  | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const o = raw as Record<string, unknown>;
+
+  const netAmount = parseBackupAmount(o.netAmount);
+  if (netAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const vatAmount = parseBackupAmount(o.vatAmount);
+  if (vatAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const perceptionsAmount = parseBackupAmount(o.perceptionsAmount);
+  if (perceptionsAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+  const totalAmount = parseBackupAmount(o.totalAmount);
+  if (totalAmount === "invalid") {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  const tipoMonedaRaw = o.tipoMoneda;
+  if (
+    tipoMonedaRaw !== null &&
+    tipoMonedaRaw !== undefined &&
+    typeof tipoMonedaRaw !== "string"
+  ) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  if (!("aiPayload" in o)) {
+    return { ok: false, error: CONVERSION_BACKUP_INVALID_MESSAGE };
+  }
+
+  return {
+    ok: true,
+    backup: {
+      netAmount,
+      vatAmount,
+      perceptionsAmount,
+      totalAmount,
+      aiPayload: o.aiPayload ?? null,
+      tipoMoneda:
+        typeof tipoMonedaRaw === "string" ? tipoMonedaRaw : null,
+    },
+  };
+}
+
 /** Carga + valida que la factura sea del usuario y esté lista para editar. */
 async function loadEditableInvoice(userId: string, invoiceId: string | null) {
   if (!invoiceId) {
@@ -1518,7 +1593,9 @@ export async function revertInvoiceConversion(
   if (invoice.conversionBackup == null) {
     return { ok: false, error: "La factura no tiene una conversión para revertir." };
   }
-  const backup = invoice.conversionBackup as ConversionBackup;
+  const parsedBackup = parseConversionBackup(invoice.conversionBackup);
+  if (!parsedBackup.ok) return parsedBackup;
+  const backup = parsedBackup.backup;
   const toDecimal = (v: string | null) =>
     v != null ? new Prisma.Decimal(v) : null;
 
