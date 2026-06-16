@@ -295,3 +295,43 @@ describe("buildInvoiceJson ignorar bonificaciones", () => {
     );
   });
 });
+
+const presupuestoJsonBase = {
+  movementId: "mov-1",
+  empresa: "01",
+  sucursal: "01",
+  supplierCode: "P001",
+  invoiceDate: "2026-01-15",
+  documentKind: "PRESUPUESTO",
+  invoiceNumber: "12345",
+  netAmount: "5000",
+  vatAmount: null,
+  vatLines: null,
+  perceptionsAmount: null,
+  perceptionLines: null,
+  discountAmount: null,
+  discountLines: null,
+  totalAmount: "5000",
+  chartAccount: { id: "1", code: "411", name: "Compras", type: null },
+  vatChartAccountCode: null,
+  bonificacionAccountCode: null,
+} as const;
+
+describe("buildInvoiceJson presupuesto + letra configurada", () => {
+  it("letra X (no fiscal AFIP) deja codigoComprobante null en el JSON ERP", () => {
+    const json = buildInvoiceJson({
+      ...presupuestoJsonBase,
+      invoiceType: "X",
+    });
+    assert.equal(json.codigoComprobante, null);
+    assert.equal(json.contable[0]!.tipoImpuesto, PRESUPUESTO_TIPO_IMPUESTO);
+  });
+
+  it("letra A en presupuesto genera FA (misma regla que factura fiscal)", () => {
+    const json = buildInvoiceJson({
+      ...presupuestoJsonBase,
+      invoiceType: "A",
+    });
+    assert.equal(json.codigoComprobante, "FA");
+  });
+});

@@ -1,9 +1,22 @@
+import { redirect } from "next/navigation";
+
+import { auth } from "@/auth";
+import { getPresupuestoLetra } from "@/actions/presupuesto-settings";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { UploadForm } from "@/components/upload-form";
 import { isDatabaseConfigured } from "@/lib/database-config";
 
-export default function UploadPage() {
+export default async function UploadPage() {
   const dbOk = isDatabaseConfigured();
+  let presupuestoLetra: string | null = null;
+
+  if (dbOk) {
+    const session = await auth();
+    if (!session?.user?.id) {
+      redirect("/iniciar-sesion");
+    }
+    presupuestoLetra = await getPresupuestoLetra();
+  }
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
@@ -15,7 +28,7 @@ export default function UploadPage() {
           <DatabaseSetupCard variant="inline" />
         </div>
       ) : null}
-      <UploadForm />
+      <UploadForm presupuestoLetra={presupuestoLetra} />
     </main>
   );
 }

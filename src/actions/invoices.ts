@@ -90,6 +90,16 @@ const BATCH_CONCURRENCY = Math.max(
 );
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
+/** Letra por defecto configurada por el usuario para asignar a documentos Presupuesto. */
+async function loadPresupuestoLetra(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { presupuestoLetra: true },
+  });
+  const letra = user?.presupuestoLetra?.trim();
+  return letra ? letra : null;
+}
+
 export type UploadBatchState =
   | { status: "idle" }
   | {
@@ -352,6 +362,11 @@ async function applyExtractionToInvoice(
       supplement: discountSupplement,
     });
   logDiscountResolution(`invoice:${invoiceId}`, discountResolution);
+
+  if (documentKind === "PRESUPUESTO") {
+    const presupuestoLetra = await loadPresupuestoLetra(userId);
+    if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
+  }
 
   const aiPayloadOut: Record<string, unknown> = {
     ...(resolvedExtracted as Record<string, unknown>),
@@ -752,6 +767,11 @@ export async function uploadInvoice(formData: FormData) {
     const fiscalAuthType = doc.fiscalAuthType;
     const fiscalAuthCode = doc.fiscalAuthCode;
 
+    if (documentKind === "PRESUPUESTO") {
+      const presupuestoLetra = await loadPresupuestoLetra(userId);
+      if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
+    }
+
     const aiPayloadOut: Record<string, unknown> = {
       ...(resolvedExtracted as Record<string, unknown>),
     };
@@ -1050,11 +1070,16 @@ export async function updateInvoiceExtractedFields(
   const invoiceNumber = normalizeNumeroComprobanteFromAiOrNull(
     formText(formData.get("invoiceNumber")),
   );
-  const invoiceType = formText(formData.get("invoiceType"));
+  const invoiceTypeRaw = formText(formData.get("invoiceType"));
   const empresa = formText(formData.get("empresa"));
   const sucursal = formText(formData.get("sucursal"));
   const documentKindRaw = formText(formData.get("documentKind"));
   const documentKind = parseDocumentKind(documentKindRaw);
+  let invoiceType = invoiceTypeRaw;
+  if (documentKind === "PRESUPUESTO") {
+    const presupuestoLetra = await loadPresupuestoLetra(session.user.id);
+    if (presupuestoLetra) invoiceType = presupuestoLetra;
+  }
   const documentClassRaw = formText(formData.get("documentClass"));
   const documentClass =
     documentKind === "PRESUPUESTO"

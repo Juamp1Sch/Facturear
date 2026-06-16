@@ -91,7 +91,11 @@ function PendingHint({ invoiceCount, fileCount }: { invoiceCount: number; fileCo
 
 const initialState: UploadBatchState = { status: "idle" };
 
-export function UploadForm() {
+export function UploadForm({
+  presupuestoLetra = null,
+}: {
+  presupuestoLetra?: string | null;
+}) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [state, formAction, isPending] = useActionState(
     uploadInvoiceBatch,
@@ -424,6 +428,7 @@ export function UploadForm() {
           invoices={batchInvoices ?? state.invoices}
           taxChartAccounts={state.taxChartAccounts}
           apiConfigured={state.apiConfigured}
+          presupuestoLetra={presupuestoLetra}
           onInvoiceUpdated={handleInvoiceUpdated}
         />
       ) : null}

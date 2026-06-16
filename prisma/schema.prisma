@@ -17,6 +17,7 @@ model User {
   verificationTokenExpiresAt   DateTime? @map("verification_token_expires_at")
   passwordResetTokenHash       String?   @map("password_reset_token_hash")
   passwordResetTokenExpiresAt  DateTime? @map("password_reset_token_expires_at")
+  presupuestoLetra             String?   @map("presupuesto_letra")
   invoices      Invoice[]
   suppliers     Supplier[]
   supplierAliases       SupplierAlias[]
