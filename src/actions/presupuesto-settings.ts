@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { prisma } from "@/lib/db";
-import { normalizePresupuestoLetra } from "@/lib/presupuesto-letra";
+import { validatePresupuestoLetra } from "@/lib/presupuesto-letra";
 
 export async function getPresupuestoLetra(): Promise<string | null> {
   if (!isDatabaseConfigured()) return null;
@@ -40,15 +40,18 @@ export async function savePresupuestoLetra(
     redirect("/iniciar-sesion");
   }
 
-  const letra = normalizePresupuestoLetra(String(formData.get("letra") ?? ""));
+  const validation = validatePresupuestoLetra(String(formData.get("letra") ?? ""));
+  if (!validation.ok) {
+    return { ok: false, error: validation.error };
+  }
 
   await prisma.user.update({
     where: { id: session.user.id },
-    data: { presupuestoLetra: letra },
+    data: { presupuestoLetra: validation.letra },
   });
 
   revalidatePath("/cuentas/asociar-proveedores");
   revalidatePath("/upload");
 
-  return { ok: true, letra };
+  return { ok: true, letra: validation.letra };
 }
