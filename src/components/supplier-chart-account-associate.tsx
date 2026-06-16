@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 
+import { savePresupuestoLetra } from "@/actions/presupuesto-settings";
 import {
   removeSupplierChartAccountLink,
   saveSupplierChartAccountLinks,
@@ -32,9 +33,19 @@ import { cn } from "@/lib/utils";
 
 const LINKS_PAGE_SIZE = 15;
 
-export function SupplierChartAccountAssociate({ data }: { data: AssociationFormData }) {
+export function SupplierChartAccountAssociate({
+  data,
+  presupuestoLetra,
+}: {
+  data: AssociationFormData;
+  presupuestoLetra: string | null;
+}) {
   const router = useRouter();
   const [chartAccountId, setChartAccountId] = useState("");
+  const [letra, setLetra] = useState(presupuestoLetra ?? "");
+  const [letraError, setLetraError] = useState<string | null>(null);
+  const [letraSuccess, setLetraSuccess] = useState<string | null>(null);
+  const [letraPending, setLetraPending] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +125,8 @@ export function SupplierChartAccountAssociate({ data }: { data: AssociationFormD
 
   return (
     <div className="space-y-6">
-      <Card className="max-w-2xl">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <Card className="lg:flex-1 lg:max-w-2xl">
         <CardHeader>
           <CardTitle>Nueva asociación</CardTitle>
           <CardDescription>
@@ -243,6 +255,72 @@ export function SupplierChartAccountAssociate({ data }: { data: AssociationFormD
           </form>
         </CardContent>
       </Card>
+
+      <Card className="lg:w-80 lg:shrink-0">
+        <CardHeader>
+          <CardTitle>Tipo de letra para Presupuestos</CardTitle>
+          <CardDescription>
+            Este es el tipo de letra asociado a las facturas presupuestos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {letraError ? (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {letraError}
+            </div>
+          ) : null}
+          {letraSuccess ? (
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
+              {letraSuccess}
+            </div>
+          ) : null}
+
+          <form
+            className="space-y-4"
+            action={async (formData) => {
+              setLetraError(null);
+              setLetraSuccess(null);
+              setLetraPending(true);
+              try {
+                const res = await savePresupuestoLetra(formData);
+                if (res.ok) {
+                  setLetra(res.letra ?? "");
+                  setLetraSuccess(
+                    res.letra
+                      ? `Letra guardada: ${res.letra}.`
+                      : "Letra eliminada.",
+                  );
+                  router.refresh();
+                } else {
+                  setLetraError(res.error);
+                }
+              } finally {
+                setLetraPending(false);
+              }
+            }}
+          >
+            <div className="space-y-2">
+              <label htmlFor="presupuestoLetra" className="text-sm font-medium">
+                Letra
+              </label>
+              <Input
+                id="presupuestoLetra"
+                name="letra"
+                value={letra}
+                onChange={(e) => setLetra(e.target.value.toUpperCase())}
+                placeholder="Ej. X"
+                maxLength={5}
+                disabled={letraPending}
+              />
+            </div>
+
+            <Button type="submit" disabled={letraPending}>
+              {letraPending ? "Guardando…" : "Guardar Letra"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      </div>
 
       {data.links.length > 0 ? (
         <div className="space-y-3">

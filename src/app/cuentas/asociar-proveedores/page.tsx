@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { getPresupuestoLetra } from "@/actions/presupuesto-settings";
 import { getSupplierChartAssociationFormData } from "@/actions/supplier-chart-accounts";
 import { CuentasShell } from "@/components/cuentas-shell";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
@@ -24,7 +25,10 @@ export default async function AsociarProveedoresPage() {
     redirect("/iniciar-sesion");
   }
 
-  const data = await getSupplierChartAssociationFormData();
+  const [data, presupuestoLetra] = await Promise.all([
+    getSupplierChartAssociationFormData(),
+    getPresupuestoLetra(),
+  ]);
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8">
@@ -34,7 +38,7 @@ export default async function AsociarProveedoresPage() {
           etc.). Cuando subas una factura de un proveedor asociado, la cuenta se asigna
           automáticamente sin depender solo de la IA.
         </p>
-        <SupplierChartAccountAssociate data={data} />
+        <SupplierChartAccountAssociate data={data} presupuestoLetra={presupuestoLetra} />
       </CuentasShell>
     </main>
   );
