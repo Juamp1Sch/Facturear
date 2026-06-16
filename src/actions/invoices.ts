@@ -1070,11 +1070,16 @@ export async function updateInvoiceExtractedFields(
   const invoiceNumber = normalizeNumeroComprobanteFromAiOrNull(
     formText(formData.get("invoiceNumber")),
   );
-  const invoiceType = formText(formData.get("invoiceType"));
+  const invoiceTypeRaw = formText(formData.get("invoiceType"));
   const empresa = formText(formData.get("empresa"));
   const sucursal = formText(formData.get("sucursal"));
   const documentKindRaw = formText(formData.get("documentKind"));
   const documentKind = parseDocumentKind(documentKindRaw);
+  let invoiceType = invoiceTypeRaw;
+  if (documentKind === "PRESUPUESTO") {
+    const presupuestoLetra = await loadPresupuestoLetra(session.user.id);
+    if (presupuestoLetra) invoiceType = presupuestoLetra;
+  }
   const documentClassRaw = formText(formData.get("documentClass"));
   const documentClass =
     documentKind === "PRESUPUESTO"

@@ -112,6 +112,7 @@ export function InvoiceExtractedFields({
   onInvoiceUpdated,
   perceptionAccountCount = 0,
   ignoreBonificaciones = false,
+  presupuestoLetra = null,
 }: {
   invoice: SerializedInvoiceDetail;
   onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
@@ -119,6 +120,8 @@ export function InvoiceExtractedFields({
   perceptionAccountCount?: number;
   /** Si el usuario eligió ignorar bonificaciones, no se muestran en la factura. */
   ignoreBonificaciones?: boolean;
+  /** Letra por defecto del usuario para documentos Presupuesto. */
+  presupuestoLetra?: string | null;
 }) {
   const router = useRouter();
   const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
@@ -164,6 +167,9 @@ export function InvoiceExtractedFields({
   const kindForDisplay = effectiveDocumentKind(invoice);
   const isPresupuesto = isPresupuestoDocument(invoice.documentKind, invoice.documentClass);
   const [draftDocumentKind, setDraftDocumentKind] = useState<DocumentKind>(kindForDisplay);
+  const [draftInvoiceType, setDraftInvoiceType] = useState(
+    invoiceProp.invoiceType ?? "",
+  );
 
   useEffect(() => {
     setDraftDocumentKind(effectiveDocumentKind(displayInvoice));
@@ -196,6 +202,7 @@ export function InvoiceExtractedFields({
     setDraftSupplierCode(displayInvoice.supplierCode ?? "");
     setExplicitSelectedSupplierCode("");
     setSuppliers([]);
+    setDraftInvoiceType(displayInvoice.invoiceType ?? "");
   }, [
     editing,
     formKey,
@@ -619,7 +626,8 @@ export function InvoiceExtractedFields({
                 <Input
                   id="invoiceType"
                   name="invoiceType"
-                  defaultValue={invoice.invoiceType ?? ""}
+                  value={draftInvoiceType}
+                  onChange={(e) => setDraftInvoiceType(e.target.value.toUpperCase())}
                   placeholder="A, B, C…"
                 />
               </div>
@@ -631,9 +639,13 @@ export function InvoiceExtractedFields({
                   id="documentKind"
                   name="documentKind"
                   value={draftDocumentKind}
-                  onChange={(e) =>
-                    setDraftDocumentKind(e.target.value as DocumentKind)
-                  }
+                  onChange={(e) => {
+                    const kind = e.target.value as DocumentKind;
+                    setDraftDocumentKind(kind);
+                    if (kind === "PRESUPUESTO" && presupuestoLetra) {
+                      setDraftInvoiceType(presupuestoLetra);
+                    }
+                  }}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
                   {DOCUMENT_KIND_OPTIONS.map((opt) => (

@@ -61,12 +61,14 @@ export function InvoiceDetail({
   documentParts,
   showErrorBanner,
   apiConfigured,
+  presupuestoLetra = null,
 }: {
   invoice: SerializedInvoiceDetail;
   taxChartAccounts: ResolvedTaxChartAccounts;
   documentParts: { mimeType: string; previewUrl: string }[];
   showErrorBanner: boolean;
   apiConfigured: boolean;
+  presupuestoLetra?: string | null;
 }) {
   const err =
     showErrorBanner && isErrorPayload(invoice.aiPayload)
@@ -183,6 +185,7 @@ export function InvoiceDetail({
 
         <InvoiceExtractedFields
           invoice={invoice}
+          presupuestoLetra={presupuestoLetra}
           perceptionAccountCount={
             (taxChartAccounts.perceptionIvaAccountCode ? 1 : 0) +
             (taxChartAccounts.perceptionIibbAccountCode ? 1 : 0)

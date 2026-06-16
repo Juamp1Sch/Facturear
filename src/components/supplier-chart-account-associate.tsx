@@ -260,7 +260,7 @@ export function SupplierChartAccountAssociate({
         <CardHeader>
           <CardTitle>Tipo de letra para Presupuestos</CardTitle>
           <CardDescription>
-            Este es el tipo de letra asociado a las facturas presupuestos.
+            Este es el tipo de letra asociado a los presupuestos.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
