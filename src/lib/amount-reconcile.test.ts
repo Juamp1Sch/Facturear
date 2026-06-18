@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   pickBestReconcilingFields,
+  reanchorWithTrustedNetVat,
   reconcileAmounts,
+  tryFixVatOnly,
 } from "@/lib/amount-reconcile";
 
 /** Números reales factura Jeluz 00003-00075339 */
@@ -85,5 +87,63 @@ describe("pickBestReconcilingFields", () => {
 
     const picked = pickBestReconcilingFields(primary);
     assert.equal(picked, null);
+  });
+});
+
+/** Números reales factura CORESA 0006-00141462 (IVA 10,5% leído 503,73 = 50,73). */
+const CORESA_NET = 5_943.12;
+const CORESA_PERC = 297.16;
+const CORESA_VAT_OK = 1_197.32; // 1146,59 + 50,73
+const CORESA_VAT_BAD = 1_650.32; // 1146,59 + 503,73 (10,5% mal leído)
+const CORESA_TOTAL_OK = 7_437.6;
+
+describe("tryFixVatOnly (corrige IVA con neto/percepciones/total confiables)", () => {
+  it("corrige el IVA mal leído usando el total impreso (CORESA)", () => {
+    const fixed = tryFixVatOnly({
+      net: CORESA_NET,
+      vat: CORESA_VAT_BAD,
+      perceptions: CORESA_PERC,
+      total: CORESA_TOTAL_OK,
+    });
+    assert.ok(fixed);
+    assert.ok(Math.abs(fixed.vat! - CORESA_VAT_OK) <= 0.01);
+    assert.ok(reconcileAmounts(fixed).reconciled);
+  });
+
+  it("no toca nada cuando la suma ya cierra", () => {
+    const ok = {
+      net: CORESA_NET,
+      vat: CORESA_VAT_OK,
+      perceptions: CORESA_PERC,
+      total: CORESA_TOTAL_OK,
+    };
+    assert.equal(tryFixVatOnly(ok), null);
+  });
+
+  it("no corrige si el IVA derivado no es una alícuota plausible", () => {
+    // total absurdo → IVA derivado = total - net - perc no es 10,5/21/27% del neto
+    const fixed = tryFixVatOnly({
+      net: CORESA_NET,
+      vat: CORESA_VAT_BAD,
+      perceptions: CORESA_PERC,
+      total: 9_999.99,
+    });
+    assert.equal(fixed, null);
+  });
+});
+
+describe("reanchorWithTrustedNetVat no fabrica un total mayor al impreso", () => {
+  it("no infla el total cuando neto+IVA(mal leído) ya superan el total leído (CORESA)", () => {
+    // IVA inflado (1650,32 ≈ 27% del neto) pasa vatConsistentWithNet; sin el guard
+    // fabricaría total = net+vat+perc = 7890,60. Con el guard, no lo hace.
+    const result = reanchorWithTrustedNetVat({
+      net: CORESA_NET,
+      vat: CORESA_VAT_BAD,
+      perceptions: CORESA_PERC,
+      total: CORESA_TOTAL_OK,
+    });
+    if (result) {
+      assert.ok(result.total! <= CORESA_TOTAL_OK + 0.5);
+    }
   });
 });

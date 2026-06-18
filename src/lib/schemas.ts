@@ -91,13 +91,13 @@ export const invoiceExtractionSchema = z.object({
     .number()
     .nullable()
     .describe(
-      "Total de IVA del comprobante. Debe coincidir con la suma de vat_lines si las devolvés. Formato numérico interno: 1227.55 (sin separadores).",
+      "Total de IVA del comprobante: el 'Total IVA' impreso en el RECUADRO DE TOTALES (derecha del pie), leído de forma INDEPENDIENTE y dígito por dígito. La suma de vat_lines DEBE igualar este valor; si no coincide, releé el renglón del desglose más chico (típicamente 10,5%) — atención 50,73 vs 503,73 (0,05 vs 0,5). Formato numérico interno: 1227.55 (sin separadores).",
     ),
   vat_lines: z
     .array(taxBreakdownLineSchema)
     .nullable()
     .describe(
-      "Cada renglón de IVA del desglose fiscal (pie de factura, tabla de impuestos). Un elemento por alícuota o importe de IVA legible.",
+      "Cada renglón de IVA del desglose fiscal (pie de factura, tabla de impuestos, o caja de saldo). Un elemento por alícuota o importe de IVA legible. Su suma DEBE igualar vat_amount (Total IVA del recuadro); si difiere, releé el renglón más chico antes de responder.",
     ),
   perceptions_amount: z
     .number()
@@ -173,11 +173,15 @@ export const amountsSupplementSchema = z.object({
   vat_amount: z
     .number()
     .nullable()
-    .describe("Total IVA del recuadro de totales."),
+    .describe(
+      "'Total IVA' impreso en el recuadro de totales (derecha), leído independiente y dígito por dígito. La suma de vat_lines debe igualarlo.",
+    ),
   vat_lines: z
     .array(taxBreakdownLineSchema)
     .nullable()
-    .describe("Desglose de IVA si aparece en el recuadro de totales."),
+    .describe(
+      "Desglose de IVA por alícuota (21% / 10,5%) si aparece. Su suma DEBE igualar vat_amount; si difiere, releé el renglón más chico (50,73 vs 503,73).",
+    ),
   perceptions_amount: z
     .number()
     .nullable()
