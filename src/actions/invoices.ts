@@ -100,6 +100,16 @@ async function loadPresupuestoLetra(userId: string): Promise<string | null> {
   return letra ? letra : null;
 }
 
+/** Empresa por defecto configurada por el usuario para asignar a documentos Presupuesto. */
+async function loadPresupuestoEmpresa(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { presupuestoEmpresa: true },
+  });
+  const empresa = user?.presupuestoEmpresa?.trim();
+  return empresa ? empresa : null;
+}
+
 export type UploadBatchState =
   | { status: "idle" }
   | {
@@ -366,6 +376,8 @@ async function applyExtractionToInvoice(
   if (documentKind === "PRESUPUESTO") {
     const presupuestoLetra = await loadPresupuestoLetra(userId);
     if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
+    const presupuestoEmpresa = await loadPresupuestoEmpresa(userId);
+    if (presupuestoEmpresa) empresaOut = presupuestoEmpresa;
   }
 
   const aiPayloadOut: Record<string, unknown> = {
@@ -767,9 +779,12 @@ export async function uploadInvoice(formData: FormData) {
     const fiscalAuthType = doc.fiscalAuthType;
     const fiscalAuthCode = doc.fiscalAuthCode;
 
+    let empresaOut = cuitResolution.autoEmpresa;
     if (documentKind === "PRESUPUESTO") {
       const presupuestoLetra = await loadPresupuestoLetra(userId);
       if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
+      const presupuestoEmpresa = await loadPresupuestoEmpresa(userId);
+      if (presupuestoEmpresa) empresaOut = presupuestoEmpresa;
     }
 
     const aiPayloadOut: Record<string, unknown> = {
@@ -810,7 +825,7 @@ export async function uploadInvoice(formData: FormData) {
         providerName: resolvedExtracted.provider,
         providerCuit,
         supplierCode,
-        empresa: cuitResolution.autoEmpresa,
+        empresa: empresaOut,
         sucursal: cuitResolution.autoSucursal,
         movementId,
         documentKind,

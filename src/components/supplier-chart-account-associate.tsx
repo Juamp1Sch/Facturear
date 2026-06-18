@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 
-import { savePresupuestoLetra } from "@/actions/presupuesto-settings";
+import {
+  savePresupuestoEmpresa,
+  savePresupuestoLetra,
+} from "@/actions/presupuesto-settings";
 import {
   removeSupplierChartAccountLink,
   saveSupplierChartAccountLinks,
@@ -36,9 +39,11 @@ const LINKS_PAGE_SIZE = 15;
 export function SupplierChartAccountAssociate({
   data,
   presupuestoLetra,
+  presupuestoEmpresa,
 }: {
   data: AssociationFormData;
   presupuestoLetra: string | null;
+  presupuestoEmpresa: string | null;
 }) {
   const router = useRouter();
   const [chartAccountId, setChartAccountId] = useState("");
@@ -46,6 +51,10 @@ export function SupplierChartAccountAssociate({
   const [letraError, setLetraError] = useState<string | null>(null);
   const [letraSuccess, setLetraSuccess] = useState<string | null>(null);
   const [letraPending, setLetraPending] = useState(false);
+  const [empresa, setEmpresa] = useState(presupuestoEmpresa ?? "");
+  const [empresaError, setEmpresaError] = useState<string | null>(null);
+  const [empresaSuccess, setEmpresaSuccess] = useState<string | null>(null);
+  const [empresaPending, setEmpresaPending] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -256,7 +265,8 @@ export function SupplierChartAccountAssociate({
         </CardContent>
       </Card>
 
-      <Card className="lg:w-80 lg:shrink-0">
+      <div className="flex flex-col gap-6 lg:w-80 lg:shrink-0">
+      <Card>
         <CardHeader>
           <CardTitle>Tipo de letra para Presupuestos</CardTitle>
           <CardDescription>
@@ -320,6 +330,73 @@ export function SupplierChartAccountAssociate({
           </form>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Tipo de empresa para Presupuestos</CardTitle>
+          <CardDescription>
+            Este es el número de empresa asociado a los presupuestos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {empresaError ? (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {empresaError}
+            </div>
+          ) : null}
+          {empresaSuccess ? (
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
+              {empresaSuccess}
+            </div>
+          ) : null}
+
+          <form
+            className="space-y-4"
+            action={async (formData) => {
+              setEmpresaError(null);
+              setEmpresaSuccess(null);
+              setEmpresaPending(true);
+              try {
+                const res = await savePresupuestoEmpresa(formData);
+                if (res.ok) {
+                  setEmpresa(res.empresa ?? "");
+                  setEmpresaSuccess(
+                    res.empresa
+                      ? `Empresa guardada: ${res.empresa}.`
+                      : "Empresa eliminada.",
+                  );
+                  router.refresh();
+                } else {
+                  setEmpresaError(res.error);
+                }
+              } finally {
+                setEmpresaPending(false);
+              }
+            }}
+          >
+            <div className="space-y-2">
+              <label htmlFor="presupuestoEmpresa" className="text-sm font-medium">
+                Empresa
+              </label>
+              <Input
+                id="presupuestoEmpresa"
+                name="empresa"
+                inputMode="numeric"
+                value={empresa}
+                onChange={(e) => setEmpresa(e.target.value)}
+                placeholder="Ej. 1"
+                maxLength={10}
+                disabled={empresaPending}
+              />
+            </div>
+
+            <Button type="submit" disabled={empresaPending}>
+              {empresaPending ? "Guardando…" : "Guardar Empresa"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      </div>
       </div>
 
       {data.links.length > 0 ? (
