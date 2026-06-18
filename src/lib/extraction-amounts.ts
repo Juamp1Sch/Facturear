@@ -11,11 +11,14 @@ import {
 import {
   pickBestReconcilingFields,
   reconcileAmounts,
+  reconcileTolerance,
   reanchorWithTrustedNetVat,
   tryFixPerceptionsOnly,
+  tryFixVatOnly,
   vatConsistentWithNet,
   type AmountFields,
 } from "@/lib/amount-reconcile";
+import { classifyVatRate } from "@/lib/vat-rate";
 import { hasJeluzLayoutDiscountSignal } from "@/lib/discount-breakdown";
 import type {
   AmountsSupplement,
@@ -33,7 +36,7 @@ export type FinalizedAmounts = {
   amountsReconciled: boolean;
   amountsDiscrepancy: number | null;
   amountsAlgebraicallyDerived: boolean;
-  correctedField: ("net" | "perceptions" | "total")[] | null;
+  correctedField: ("net" | "vat" | "perceptions" | "total")[] | null;
   extracted: InvoiceExtraction;
 };
 
@@ -41,12 +44,33 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/**
+ * IVA a usar para la matemática: la suma del desglose (vat_lines) salvo que
+ * contradiga al "Total IVA" agregado (vat_amount) más que la tolerancia — en ese
+ * caso manda el agregado impreso, porque un renglón del split suele venir mal leído
+ * (ej. 50,73 leído como 503,73). Si solo hay uno, se usa ese.
+ */
+function resolveVat(
+  vatFromLines: number | null,
+  vatAmount: number | null,
+): number | null {
+  if (vatFromLines == null) return vatAmount;
+  if (vatAmount == null) return vatFromLines;
+  if (
+    Math.abs(roundMoney(vatFromLines) - roundMoney(vatAmount)) >
+    reconcileTolerance(vatAmount)
+  ) {
+    return vatAmount;
+  }
+  return vatFromLines;
+}
+
 function resolveAmountFields(extracted: InvoiceExtraction): AmountFields {
   const vatFromLines = sumTaxLines(extracted.vat_lines);
   const perceptionsFromLines = sumTaxLines(extracted.perception_lines);
   return {
     net: extracted.net_amount,
-    vat: vatFromLines ?? extracted.vat_amount,
+    vat: resolveVat(vatFromLines, extracted.vat_amount),
     perceptions: perceptionsFromLines ?? extracted.perceptions_amount,
     total: extracted.total_amount,
   };
@@ -57,10 +81,53 @@ function resolveSupplementFields(supplement: AmountsSupplement): AmountFields {
   const perceptionsFromLines = sumTaxLines(supplement.perception_lines);
   return {
     net: supplement.net_amount,
-    vat: vatFromLines ?? supplement.vat_amount,
+    vat: resolveVat(vatFromLines, supplement.vat_amount),
     perceptions: perceptionsFromLines ?? supplement.perceptions_amount,
     total: supplement.total_amount,
   };
+}
+
+/**
+ * Repara el desglose IVA mostrado para que sume el IVA resuelto. Con dos alícuotas
+ * distintas y neto conocido, recomputa el split exacto desde neto + IVA + alícuotas
+ * (resuelve net1 = (vat − r2·net)/(r1 − r2)); con una sola línea la ajusta; si no se
+ * puede repartir con confianza, deja un único renglón "IVA".
+ */
+export function reconcileVatLines(
+  lines: TaxBreakdownLine[] | null | undefined,
+  resolvedVat: number | null,
+  net: number | null,
+): TaxBreakdownLine[] | null {
+  if (!lines?.length) return lines ?? null;
+  if (resolvedVat == null || resolvedVat <= 0) return lines;
+
+  const sum = roundMoney(lines.reduce((acc, l) => acc + l.amount, 0));
+  if (Math.abs(sum - roundMoney(resolvedVat)) <= 0.01) return lines;
+
+  if (lines.length === 2 && net != null && net > 0) {
+    const r1 = classifyVatRate(lines[0]!.label).rate;
+    const r2 = classifyVatRate(lines[1]!.label).rate;
+    if (r1 !== r2) {
+      const net1 = (resolvedVat - r2 * net) / (r1 - r2);
+      const net2 = net - net1;
+      if (net1 >= 0 && net2 >= 0) {
+        const amount1 = roundMoney(r1 * net1);
+        const amount2 = roundMoney(resolvedVat - amount1);
+        if (amount1 >= 0 && amount2 >= 0) {
+          return [
+            { label: lines[0]!.label, amount: amount1 },
+            { label: lines[1]!.label, amount: amount2 },
+          ];
+        }
+      }
+    }
+  }
+
+  if (lines.length === 1) {
+    return [{ label: lines[0]!.label, amount: roundMoney(resolvedVat) }];
+  }
+
+  return [{ label: "IVA", amount: roundMoney(resolvedVat) }];
 }
 
 /**
@@ -122,14 +189,21 @@ function fieldsMatchRead(
 function detectCorrectedFields(
   before: AmountFields,
   after: AmountFields,
-): ("net" | "perceptions" | "total")[] {
-  const corrected: ("net" | "perceptions" | "total")[] = [];
+): ("net" | "vat" | "perceptions" | "total")[] {
+  const corrected: ("net" | "vat" | "perceptions" | "total")[] = [];
   if (
     before.net != null &&
     after.net != null &&
     before.net !== after.net
   ) {
     corrected.push("net");
+  }
+  if (
+    before.vat != null &&
+    after.vat != null &&
+    before.vat !== after.vat
+  ) {
+    corrected.push("vat");
   }
   if (
     before.perceptions != null &&
@@ -292,7 +366,7 @@ export async function finalizeExtractedAmounts(
   let fields = primaryFields;
   let reconcile = reconcileAmounts(fields);
   let algebraicallyDerived = false;
-  let correctedField: ("net" | "perceptions" | "total")[] | null = null;
+  let correctedField: ("net" | "vat" | "perceptions" | "total")[] | null = null;
   let needsReview = false;
 
   let supplement: AmountsSupplement | null =
@@ -344,6 +418,16 @@ export async function finalizeExtractedAmounts(
   }
 
   if (!reconcile.reconciled) {
+    const fixedVat = tryFixVatOnly(fields);
+    if (fixedVat) {
+      fields = fixedVat;
+      reconcile = reconcileAmounts(fields);
+      algebraicallyDerived = true;
+      correctedField = detectCorrectedFields(primaryFields, fields);
+    }
+  }
+
+  if (!reconcile.reconciled) {
     const candidateSets = [primaryFields];
     if (supplementFields) candidateSets.push(supplementFields);
     const picked = pickBestReconcilingFields(...candidateSets);
@@ -371,9 +455,14 @@ export async function finalizeExtractedAmounts(
     needsReview = false;
   }
 
-  const current = applyAmountFieldsToExtraction(extracted, fields, {
+  const base = applyAmountFieldsToExtraction(extracted, fields, {
     clearPerceptionLines: correctedField?.includes("perceptions") ?? false,
   });
+  // Si se corrigió el IVA, reparar el desglose mostrado para que sume el IVA resuelto.
+  const current: InvoiceExtraction = {
+    ...base,
+    vat_lines: reconcileVatLines(base.vat_lines, fields.vat, fields.net),
+  };
 
   // El recorte ampliado del pie lee la letra chica (incl. el tipo de cambio fiscal)
   // mucho más nítido que la primera pasada sobre la imagen completa: si lo trae, pisa.
