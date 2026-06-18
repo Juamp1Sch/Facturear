@@ -93,8 +93,10 @@ const initialState: UploadBatchState = { status: "idle" };
 
 export function UploadForm({
   presupuestoLetra = null,
+  presupuestoEmpresa = null,
 }: {
   presupuestoLetra?: string | null;
+  presupuestoEmpresa?: string | null;
 }) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [state, formAction, isPending] = useActionState(
@@ -429,6 +431,7 @@ export function UploadForm({
           taxChartAccounts={state.taxChartAccounts}
           apiConfigured={state.apiConfigured}
           presupuestoLetra={presupuestoLetra}
+          presupuestoEmpresa={presupuestoEmpresa}
           onInvoiceUpdated={handleInvoiceUpdated}
         />
       ) : null}

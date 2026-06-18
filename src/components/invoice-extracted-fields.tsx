@@ -113,6 +113,7 @@ export function InvoiceExtractedFields({
   perceptionAccountCount = 0,
   ignoreBonificaciones = false,
   presupuestoLetra = null,
+  presupuestoEmpresa = null,
 }: {
   invoice: SerializedInvoiceDetail;
   onInvoiceUpdated?: (invoice: SerializedInvoiceDetail) => void;
@@ -122,6 +123,8 @@ export function InvoiceExtractedFields({
   ignoreBonificaciones?: boolean;
   /** Letra por defecto del usuario para documentos Presupuesto. */
   presupuestoLetra?: string | null;
+  /** Empresa por defecto del usuario para documentos Presupuesto. */
+  presupuestoEmpresa?: string | null;
 }) {
   const router = useRouter();
   const [displayInvoice, setDisplayInvoice] = useState(invoiceProp);
@@ -642,8 +645,9 @@ export function InvoiceExtractedFields({
                   onChange={(e) => {
                     const kind = e.target.value as DocumentKind;
                     setDraftDocumentKind(kind);
-                    if (kind === "PRESUPUESTO" && presupuestoLetra) {
-                      setDraftInvoiceType(presupuestoLetra);
+                    if (kind === "PRESUPUESTO") {
+                      if (presupuestoLetra) setDraftInvoiceType(presupuestoLetra);
+                      if (presupuestoEmpresa) setDraftEmpresa(presupuestoEmpresa);
                     }
                   }}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"

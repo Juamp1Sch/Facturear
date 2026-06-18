@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { getPresupuestoLetra } from "@/actions/presupuesto-settings";
+import { getPresupuestoEmpresa, getPresupuestoLetra } from "@/actions/presupuesto-settings";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { UploadForm } from "@/components/upload-form";
 import { isDatabaseConfigured } from "@/lib/database-config";
@@ -9,13 +9,17 @@ import { isDatabaseConfigured } from "@/lib/database-config";
 export default async function UploadPage() {
   const dbOk = isDatabaseConfigured();
   let presupuestoLetra: string | null = null;
+  let presupuestoEmpresa: string | null = null;
 
   if (dbOk) {
     const session = await auth();
     if (!session?.user?.id) {
       redirect("/iniciar-sesion");
     }
-    presupuestoLetra = await getPresupuestoLetra();
+    [presupuestoLetra, presupuestoEmpresa] = await Promise.all([
+      getPresupuestoLetra(),
+      getPresupuestoEmpresa(),
+    ]);
   }
 
   return (
@@ -28,7 +32,10 @@ export default async function UploadPage() {
           <DatabaseSetupCard variant="inline" />
         </div>
       ) : null}
-      <UploadForm presupuestoLetra={presupuestoLetra} />
+      <UploadForm
+        presupuestoLetra={presupuestoLetra}
+        presupuestoEmpresa={presupuestoEmpresa}
+      />
     </main>
   );
 }
