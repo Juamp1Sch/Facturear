@@ -53,6 +53,7 @@ export async function savePresupuestoLetra(
 
   revalidatePath("/cuentas/asociar-proveedores");
   revalidatePath("/upload");
+  revalidatePath("/history");
 
   return { ok: true, letra: validation.letra };
 }
@@ -101,6 +102,7 @@ export async function savePresupuestoEmpresa(
 
   revalidatePath("/cuentas/asociar-proveedores");
   revalidatePath("/upload");
+  revalidatePath("/history");
 
   return { ok: true, empresa: validation.empresa };
 }
