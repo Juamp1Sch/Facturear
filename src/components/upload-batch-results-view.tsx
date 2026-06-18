@@ -110,12 +110,14 @@ export function UploadBatchResultsView({
   apiConfigured,
   onInvoiceUpdated,
   presupuestoLetra = null,
+  presupuestoEmpresa = null,
 }: {
   invoices: SerializedBatchInvoice[];
   taxChartAccounts: ResolvedTaxChartAccounts;
   apiConfigured: boolean;
   onInvoiceUpdated?: (invoice: SerializedBatchInvoice) => void;
   presupuestoLetra?: string | null;
+  presupuestoEmpresa?: string | null;
 }) {
   const [invoiceIndex, setInvoiceIndex] = useState(0);
   const invoice = invoices[invoiceIndex];
@@ -220,6 +222,7 @@ export function UploadBatchResultsView({
         <InvoiceExtractedFields
           invoice={invoice}
           presupuestoLetra={presupuestoLetra}
+          presupuestoEmpresa={presupuestoEmpresa}
           onInvoiceUpdated={onInvoiceUpdated}
           perceptionAccountCount={
             (taxChartAccounts.perceptionIvaAccountCode ? 1 : 0) +

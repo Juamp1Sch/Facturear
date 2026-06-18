@@ -90,24 +90,20 @@ const BATCH_CONCURRENCY = Math.max(
 );
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
-/** Letra por defecto configurada por el usuario para asignar a documentos Presupuesto. */
-async function loadPresupuestoLetra(userId: string): Promise<string | null> {
+/** Valores por defecto configurados por el usuario para documentos Presupuesto. */
+async function loadPresupuestoDefaults(
+  userId: string,
+): Promise<{ letra: string | null; empresa: string | null }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { presupuestoLetra: true },
+    select: { presupuestoLetra: true, presupuestoEmpresa: true },
   });
   const letra = user?.presupuestoLetra?.trim();
-  return letra ? letra : null;
-}
-
-/** Empresa por defecto configurada por el usuario para asignar a documentos Presupuesto. */
-async function loadPresupuestoEmpresa(userId: string): Promise<string | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { presupuestoEmpresa: true },
-  });
   const empresa = user?.presupuestoEmpresa?.trim();
-  return empresa ? empresa : null;
+  return {
+    letra: letra ? letra : null,
+    empresa: empresa ? empresa : null,
+  };
 }
 
 export type UploadBatchState =
@@ -374,10 +370,11 @@ async function applyExtractionToInvoice(
   logDiscountResolution(`invoice:${invoiceId}`, discountResolution);
 
   if (documentKind === "PRESUPUESTO") {
-    const presupuestoLetra = await loadPresupuestoLetra(userId);
-    if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
-    const presupuestoEmpresa = await loadPresupuestoEmpresa(userId);
-    if (presupuestoEmpresa) empresaOut = presupuestoEmpresa;
+    const presupuestoDefaults = await loadPresupuestoDefaults(userId);
+    if (presupuestoDefaults.letra) {
+      resolvedExtracted.invoice_type = presupuestoDefaults.letra;
+    }
+    if (presupuestoDefaults.empresa) empresaOut = presupuestoDefaults.empresa;
   }
 
   const aiPayloadOut: Record<string, unknown> = {
@@ -781,10 +778,11 @@ export async function uploadInvoice(formData: FormData) {
 
     let empresaOut = cuitResolution.autoEmpresa;
     if (documentKind === "PRESUPUESTO") {
-      const presupuestoLetra = await loadPresupuestoLetra(userId);
-      if (presupuestoLetra) resolvedExtracted.invoice_type = presupuestoLetra;
-      const presupuestoEmpresa = await loadPresupuestoEmpresa(userId);
-      if (presupuestoEmpresa) empresaOut = presupuestoEmpresa;
+      const presupuestoDefaults = await loadPresupuestoDefaults(userId);
+      if (presupuestoDefaults.letra) {
+        resolvedExtracted.invoice_type = presupuestoDefaults.letra;
+      }
+      if (presupuestoDefaults.empresa) empresaOut = presupuestoDefaults.empresa;
     }
 
     const aiPayloadOut: Record<string, unknown> = {
@@ -1086,14 +1084,15 @@ export async function updateInvoiceExtractedFields(
     formText(formData.get("invoiceNumber")),
   );
   const invoiceTypeRaw = formText(formData.get("invoiceType"));
-  const empresa = formText(formData.get("empresa"));
+  let empresa = formText(formData.get("empresa"));
   const sucursal = formText(formData.get("sucursal"));
   const documentKindRaw = formText(formData.get("documentKind"));
   const documentKind = parseDocumentKind(documentKindRaw);
   let invoiceType = invoiceTypeRaw;
   if (documentKind === "PRESUPUESTO") {
-    const presupuestoLetra = await loadPresupuestoLetra(session.user.id);
-    if (presupuestoLetra) invoiceType = presupuestoLetra;
+    const presupuestoDefaults = await loadPresupuestoDefaults(session.user.id);
+    if (presupuestoDefaults.letra) invoiceType = presupuestoDefaults.letra;
+    if (presupuestoDefaults.empresa) empresa = presupuestoDefaults.empresa;
   }
   const documentClassRaw = formText(formData.get("documentClass"));
   const documentClass =
@@ -1167,7 +1166,11 @@ export async function updateInvoiceExtractedFields(
   // mismo membrete (aunque abreviado) se asocien automáticamente.
   await rememberSupplierAlias(session.user.id, finalProviderName, supplierCode);
 
-  await upsertCuitEmpresa(session.user.id, finalCuit, empresa);
+  // En presupuestos la empresa la fuerza la config del usuario, no es un dato
+  // del CUIT: no la aprendemos para no contaminar el autocompletado de fiscales.
+  if (documentKind !== "PRESUPUESTO") {
+    await upsertCuitEmpresa(session.user.id, finalCuit, empresa);
+  }
   await upsertCuitSucursal(session.user.id, finalCuit, sucursal);
 
   const chartAccountCode = formText(formData.get("chartAccountCode"));

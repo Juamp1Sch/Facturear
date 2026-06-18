@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { isApiConfiguredForUser } from "@/actions/api-config";
-import { getPresupuestoLetra } from "@/actions/presupuesto-settings";
+import { getPresupuestoEmpresa, getPresupuestoLetra } from "@/actions/presupuesto-settings";
 import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { InvoiceDetail } from "@/components/invoice-detail";
 import { prisma } from "@/lib/db";
@@ -61,19 +61,26 @@ export default async function InvoiceDetailPage({
           },
         ];
 
-  const [documentParts, taxChartAccounts, apiConfigured, cuitAssociations, presupuestoLetra] =
-    await Promise.all([
-      Promise.all(
-        fileRows.map(async (f) => ({
-          mimeType: f.mimeType,
-          previewUrl: await getSignedReadUrl(f.fileKey),
-        })),
-      ),
-      resolveTaxChartAccountsForUser(session.user.id),
-      isApiConfiguredForUser(session.user.id),
-      resolveEmpresaSucursalForInvoice(session.user.id, invoice.providerCuit),
-      getPresupuestoLetra(),
-    ]);
+  const [
+    documentParts,
+    taxChartAccounts,
+    apiConfigured,
+    cuitAssociations,
+    presupuestoLetra,
+    presupuestoEmpresa,
+  ] = await Promise.all([
+    Promise.all(
+      fileRows.map(async (f) => ({
+        mimeType: f.mimeType,
+        previewUrl: await getSignedReadUrl(f.fileKey),
+      })),
+    ),
+    resolveTaxChartAccountsForUser(session.user.id),
+    isApiConfiguredForUser(session.user.id),
+    resolveEmpresaSucursalForInvoice(session.user.id, invoice.providerCuit),
+    getPresupuestoLetra(),
+    getPresupuestoEmpresa(),
+  ]);
 
   const data = JSON.parse(JSON.stringify(invoice)) as SerializedInvoiceDetail;
   data.cuitEmpresaOptions = cuitAssociations.empresas;
@@ -98,6 +105,7 @@ export default async function InvoiceDetailPage({
         showErrorBanner={query.error === "1"}
         apiConfigured={apiConfigured}
         presupuestoLetra={presupuestoLetra}
+        presupuestoEmpresa={presupuestoEmpresa}
       />
     </main>
   );
