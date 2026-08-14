@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Nunito } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 
 import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
@@ -38,6 +39,7 @@ export default function RootLayout({
         <div className="flex w-full min-w-0 flex-1 flex-col items-center">
           {children}
         </div>
+        <Analytics />
       </body>
     </html>
   );
