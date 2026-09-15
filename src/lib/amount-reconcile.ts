@@ -118,6 +118,45 @@ export function tryFixPerceptionsOnly(fields: AmountFields): AmountFields | null
   return fixed;
 }
 
+/**
+ * Si neto, percepciones y total están bien pero el IVA no cierra la suma,
+ * corrige IVA = total - neto - percepciones (caso típico: un renglón del desglose
+ * mal leído, ej. 50,73 leído como 503,73). Solo acepta si el IVA derivado es una
+ * alícuota argentina plausible respecto del neto y el descuadre lo explica el IVA.
+ */
+export function tryFixVatOnly(fields: AmountFields): AmountFields | null {
+  const { net, vat, perceptions, total } = fields;
+  if (
+    net == null ||
+    vat == null ||
+    perceptions == null ||
+    total == null ||
+    Number.isNaN(net) ||
+    Number.isNaN(vat) ||
+    Number.isNaN(perceptions) ||
+    Number.isNaN(total)
+  ) {
+    return null;
+  }
+
+  const result = reconcileAmounts(fields);
+  if (result.reconciled) return null;
+
+  const derivedVat = roundMoney(total - net - perceptions);
+  if (derivedVat < 0) return null;
+  if (!vatConsistentWithNet(net, derivedVat)) return null;
+
+  const fixed: AmountFields = { ...fields, vat: derivedVat };
+  if (!reconcileAmounts(fixed).reconciled) return null;
+
+  const vatDelta = roundMoney(derivedVat - vat);
+  if (Math.abs(Math.abs(result.discrepancy) - Math.abs(vatDelta)) > 0.01) {
+    return null;
+  }
+
+  return fixed;
+}
+
 function scoreReconcilingCandidate(
   fields: AmountFields,
   supplement?: AmountFields | null,
@@ -230,6 +269,17 @@ export function reanchorWithTrustedNetVat(
       primary.perceptions === derivedPerc &&
       primary.total === total;
     if (!unchanged) return fields;
+  }
+
+  // Si el neto+IVA ya superan un total leído, el IVA es sospechoso (renglón mal
+  // leído): NO fabriques un total mayor al impreso; dejá que la corrección de IVA
+  // actúe aguas abajo (tryFixVatOnly).
+  const readTotalAnchor = primary.total ?? supplement?.total ?? null;
+  if (
+    readTotalAnchor != null &&
+    net + vat > readTotalAnchor + reconcileTolerance(readTotalAnchor)
+  ) {
+    return null;
   }
 
   const percCandidates = uniqueAmountCandidates([
