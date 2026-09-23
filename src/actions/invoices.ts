@@ -47,6 +47,7 @@ import {
 import type { SerializedBatchInvoice } from "@/types/invoice";
 import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import {
   normalizeArgentineCuitFromAiOrNull,
   validateArgentineCuitForEntry,
@@ -66,7 +67,7 @@ import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account
 import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
-import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
+import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
 import { parseDocumentKind } from "@/lib/comprobante-code";
 import {
@@ -78,6 +79,8 @@ import { formatOpenAIExtractionError } from "@/lib/openai-retry";
 import { readInvoiceFile, uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
 /**
  * Facturas procesadas en paralelo. En Tier 1 de OpenAI (gpt-4o = 30.000 TPM) el cuello
@@ -264,8 +267,10 @@ async function extractFromParts(
       if (!pdfEmbeddedTextIsWeak(pdfText)) {
         ocrNotes.push(`--- Parte ${i + 1} (PDF texto) ---\n${pdfText.slice(0, 8000)}`);
       }
-      const pagePng = await rasterizePdfFirstPagePng(part.buffer);
-      visionImages.push({ buffer: pagePng, mimeType: "image/png" });
+      const pagePngs = await rasterizePdfPagesPng(part.buffer);
+      for (const pagePng of pagePngs) {
+        visionImages.push({ buffer: pagePng, mimeType: "image/png" });
+      }
     } else {
       visionImages.push({
         buffer: part.buffer,
@@ -488,6 +493,7 @@ async function processInvoiceGroup(
       originalFileKey: first.key,
       mimeType: first.mimeType,
       status: "PROCESSING",
+      processingStartedAt: new Date(),
       files: {
         create: uploadedParts.map((p, partIndex) => ({
           partIndex,
@@ -653,6 +659,7 @@ export async function uploadInvoice(formData: FormData) {
       originalFileKey: uploaded.key,
       mimeType,
       status: "PROCESSING",
+      processingStartedAt: new Date(),
       files: {
         create: {
           partIndex: 0,
@@ -680,20 +687,16 @@ export async function uploadInvoice(formData: FormData) {
     if (mimeType === "application/pdf") {
       const pdfText = await runOcr(buffer, mimeType);
       if (pdfEmbeddedTextIsWeak(pdfText)) {
-        const pagePng = await rasterizePdfFirstPagePng(buffer);
-        const [preprocessed] = await preprocessVisionImages([
-          { buffer: pagePng, mimeType: "image/png" },
-        ]);
-        visionImages = [preprocessed];
-        extracted = await extractInvoiceDataFromImage(
-          preprocessed.buffer,
-          preprocessed.mimeType,
-          extractOpts,
+        const pagePngs = await rasterizePdfPagesPng(buffer);
+        const preprocessed = await preprocessVisionImages(
+          pagePngs.map((png) => ({ buffer: png, mimeType: "image/png" as const })),
         );
+        visionImages = preprocessed;
+        extracted = await extractInvoiceDataFromImages(preprocessed, extractOpts);
         rawOcrText =
           pdfText.trim().length > 0
-            ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en la página 1.]`
-            : "[PDF escaneado sin texto seleccionable: campos inferidos por visión en la página 1.]";
+            ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en ${preprocessed.length} página(s).]`
+            : `[PDF escaneado sin texto seleccionable: campos inferidos por visión en ${preprocessed.length} página(s).]`;
       } else {
         rawOcrText = pdfText;
         extracted = await extractInvoiceData(pdfText, extractOpts);
@@ -940,7 +943,13 @@ export async function uploadInvoiceBatch(
     mimeTypes.push(mimeType);
   }
 
-  const batchId = randomUUID();
+  // El cliente parte lotes grandes en varios requests (límite 4,5 MB de Vercel) y manda
+  // el mismo batchId en todos; si no viene o no es un UUID, se genera uno nuevo.
+  const clientBatchId = formData.get("batchId");
+  const batchId =
+    typeof clientBatchId === "string" && UUID_RE.test(clientBatchId)
+      ? clientBatchId
+      : randomUUID();
   const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
     loadSupplierMaestroCuitHintsBlock(userId),
     loadChartAccountHintsBlock(userId),
@@ -1684,8 +1693,14 @@ export async function reprocessInvoice(
   const convertedLock = conversionLockError(existing.conversionBackup);
   if (convertedLock) return convertedLock;
 
-  const previousStatus = existing.status;
-  const previousAiPayload = existing.aiPayload;
+  // Si quedó trabada en PROCESSING por un timeout previo, la libera (pasa a ERROR) antes del claim.
+  await expireStaleProcessingInvoices(userId);
+  const current = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { status: true, aiPayload: true },
+  });
+  const previousStatus = current?.status ?? existing.status;
+  const previousAiPayload = current ? current.aiPayload : existing.aiPayload;
 
   const claimed = await prisma.invoice.updateMany({
     where: {
@@ -1693,7 +1708,7 @@ export async function reprocessInvoice(
       userId,
       status: { not: "PROCESSING" },
     },
-    data: { status: "PROCESSING" },
+    data: { status: "PROCESSING", processingStartedAt: new Date() },
   });
   if (claimed.count === 0) {
     return { ok: false, error: "La factura sigue procesándose." };

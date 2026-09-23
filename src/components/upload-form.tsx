@@ -23,6 +23,11 @@ import {
   type UploadBatchState,
 } from "@/actions/invoices";
 import { UploadBatchResultsView } from "@/components/upload-batch-results-view";
+import { compressInvoiceImage } from "@/lib/client-image-compress";
+import {
+  UPLOAD_REQUEST_MAX_BYTES,
+  packUploadChunks,
+} from "@/lib/upload-chunking";
 import type { SerializedBatchInvoice } from "@/types/invoice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +41,103 @@ import {
 import { cn } from "@/lib/utils";
 
 const BATCH_MAX = Number(process.env.NEXT_PUBLIC_BATCH_MAX_FILES ?? "10") || 10;
+/** Fotos: se comprimen en el navegador antes de subir, así que aceptamos originales grandes. */
+const IMAGE_MAX_BYTES = 25 * 1024 * 1024;
+const MAX_REQUEST_MB = UPLOAD_REQUEST_MAX_BYTES / (1024 * 1024);
+
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function dropzoneErrorMessage(code: string, fallback: string): string {
+  switch (code) {
+    case "file-too-large":
+      return "Supera el tamaño máximo.";
+    case "file-invalid-type":
+      return "Solo PDF, JPG o PNG.";
+    case "too-many-files":
+      return `Máximo ${BATCH_MAX} archivos por lote.`;
+    default:
+      return fallback;
+  }
+}
+
+/**
+ * Comprime fotos y reparte el lote en varios requests: Vercel corta cada request en 4,5 MB
+ * y cada invocación tiene un tiempo máximo, así que no se puede mandar todo junto.
+ */
+async function submitBatchInChunks(
+  _prev: UploadBatchState,
+  formData: FormData,
+): Promise<UploadBatchState> {
+  const files = formData
+    .getAll("files")
+    .filter((f): f is File => f instanceof File);
+  if (files.length === 0) {
+    return { status: "error", message: "No se recibió ningún archivo." };
+  }
+  const groups = JSON.parse(String(formData.get("groups") ?? "[]")) as number[][];
+  const prepared = await Promise.all(files.map((f) => compressInvoiceImage(f)));
+
+  const { chunks, oversized } = packUploadChunks(
+    groups,
+    prepared.map((f) => f.size),
+  );
+  if (oversized.length > 0) {
+    const names = oversized
+      .map((g) => g.map((idx) => files[idx]!.name).join(" + "))
+      .join(", ");
+    return {
+      status: "error",
+      message: `Cada factura puede pesar hasta ${MAX_REQUEST_MB} MB en total y estas la superan: ${names}. Comprimí el PDF (o separalo en partes) y volvé a intentar.`,
+    };
+  }
+
+  const batchId = crypto.randomUUID();
+  const invoiceIds: string[] = [];
+  const invoices: SerializedBatchInvoice[] = [];
+  let last: Extract<UploadBatchState, { status: "ok" }> | null = null;
+
+  for (const chunk of chunks) {
+    const fd = new FormData();
+    let next = 0;
+    const localGroups = chunk.groups.map((group) =>
+      group.map((idx) => {
+        fd.append("files", prepared[idx]!);
+        return next++;
+      }),
+    );
+    fd.set("groups", JSON.stringify(localGroups));
+    fd.set("batchId", batchId);
+
+    let res: UploadBatchState;
+    try {
+      res = await uploadInvoiceBatch({ status: "idle" }, fd);
+    } catch {
+      res = {
+        status: "error",
+        message: "No se pudo completar la subida (error de red o del servidor).",
+      };
+    }
+    if (res.status !== "ok") {
+      const message = res.status === "error" ? res.message : "Error inesperado.";
+      return {
+        status: "error",
+        message:
+          invoiceIds.length > 0
+            ? `${message} Las ${invoiceIds.length} factura(s) anteriores de este lote ya se procesaron: las encontrás en Historial.`
+            : message,
+      };
+    }
+    invoiceIds.push(...res.invoiceIds);
+    invoices.push(...res.invoices);
+    last = res;
+  }
+
+  return last
+    ? { ...last, batchId, invoiceIds, invoices }
+    : { status: "error", message: "No se recibió ningún archivo." };
+}
 
 type QueueItem = {
   id: string;
@@ -83,8 +185,8 @@ function PendingHint({ invoiceCount, fileCount }: { invoiceCount: number; fileCo
   return (
     <p className="text-sm text-muted-foreground">
       Subiendo {fileCount} archivo{fileCount !== 1 ? "s" : ""} en {invoiceCount}{" "}
-      factura{invoiceCount !== 1 ? "s" : ""} → extracción con IA. Puede tardar hasta
-      un minuto.
+      factura{invoiceCount !== 1 ? "s" : ""} → extracción con IA. Los lotes grandes
+      se envían en partes; puede tardar unos minutos.
     </p>
   );
 }
@@ -100,7 +202,7 @@ export function UploadForm({
 }) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [state, formAction, isPending] = useActionState(
-    uploadInvoiceBatch,
+    submitBatchInChunks,
     initialState,
   );
   const [showNewBatch, setShowNewBatch] = useState(false);
@@ -132,7 +234,7 @@ export function UploadForm({
     });
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, fileRejections } = useDropzone({
     onDrop,
     accept: {
       "application/pdf": [".pdf"],
@@ -151,11 +253,20 @@ export function UploadForm({
         t === "image/pjpeg" ||
         t === "image/png" ||
         t === "application/octet-stream";
-      if (byExt && okType) return null;
-      return { code: "file-invalid-type", message: "Solo PDF, JPG o PNG." };
+      if (!byExt || !okType) {
+        return { code: "file-invalid-type", message: "Solo PDF, JPG o PNG." };
+      }
+      // Los PDF no se comprimen en el navegador: tienen que entrar solos en un request.
+      if (isPdfFile(file) && file.size > UPLOAD_REQUEST_MAX_BYTES) {
+        return {
+          code: "pdf-too-large",
+          message: `El PDF supera ${MAX_REQUEST_MB} MB. Comprimilo o separalo en partes.`,
+        };
+      }
+      return null;
     },
     maxFiles: BATCH_MAX,
-    maxSize: 10 * 1024 * 1024,
+    maxSize: IMAGE_MAX_BYTES,
     multiple: true,
     disabled: items.length >= BATCH_MAX || isPending,
   });
@@ -255,7 +366,7 @@ export function UploadForm({
         <CardHeader>
           <CardTitle>Subir factura{items.length > 1 ? "s" : ""}</CardTitle>
           <CardDescription>
-            {`PDF o imagen JPG / PNG. Hasta ${BATCH_MAX} archivos (10 MB c/u). Marcá "Es continuación del archivo anterior" cuando dos fotos o PDFs son la misma factura.`}
+            {`PDF o imagen JPG / PNG. Hasta ${BATCH_MAX} archivos; PDF de hasta ${MAX_REQUEST_MB} MB (las fotos se optimizan solas). Marcá "Es continuación del archivo anterior" cuando dos fotos o PDFs son la misma factura.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -302,6 +413,23 @@ export function UploadForm({
                   PDF, JPG o PNG — {items.length}/{BATCH_MAX} archivos
                 </p>
               </div>
+
+              {fileRejections.length > 0 ? (
+                <ul
+                  className="space-y-1 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                  aria-live="polite"
+                >
+                  {fileRejections.map(({ file, errors }) => (
+                    <li key={`${file.name}-${file.size}`}>
+                      <span className="font-medium">{file.name}</span>
+                      {" — "}
+                      {errors
+                        .map((e) => dropzoneErrorMessage(e.code, e.message))
+                        .join(" ")}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
 
               {items.length > 0 ? (
                 <ul className="space-y-3">

@@ -78,10 +78,47 @@ function getOpenAI() {
 }
 
 function getOpenAIModel(): string {
-  return process.env.OPENAI_MODEL ?? "gpt-4o";
+  // `||` y no `??`: una variable definida pero vacía no debe mandar model "" (400).
+  return process.env.OPENAI_MODEL?.trim() || "gpt-4o";
 }
 
 const EXTRACTION_TEMPERATURE = 0;
+
+type ReasoningEffort = "low" | "medium" | "high";
+
+/** GPT-5.x / GPT-6 y la serie o* rechazan `temperature` (HTTP 400) y usan `reasoning_effort`. */
+function isReasoningModel(model: string): boolean {
+  return /^(o\d|gpt-5|gpt-6)/i.test(model);
+}
+
+function getReasoningEffort(): ReasoningEffort {
+  const raw = process.env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
+  return raw === "low" || raw === "high" ? raw : "medium";
+}
+
+/** Modelo + parámetros de muestreo compatibles con el modelo configurado. */
+function modelParams(): {
+  model: string;
+  temperature?: number;
+  reasoning_effort?: ReasoningEffort;
+} {
+  const model = getOpenAIModel();
+  return isReasoningModel(model)
+    ? { model, reasoning_effort: getReasoningEffort() }
+    : { model, temperature: EXTRACTION_TEMPERATURE };
+}
+
+/** Deja en los logs el consumo real de tokens por pasada (para medir costo por factura). */
+function logUsage(
+  pass: string,
+  completion: { model?: string; usage?: OpenAI.CompletionUsage },
+): void {
+  const u = completion.usage;
+  if (!u) return;
+  console.info(
+    `[openai-usage] pass=${pass} model=${completion.model ?? "?"} input=${u.prompt_tokens} cached=${u.prompt_tokens_details?.cached_tokens ?? 0} output=${u.completion_tokens} reasoning=${u.completion_tokens_details?.reasoning_tokens ?? 0}`,
+  );
+}
 
 export async function extractInvoiceData(
   rawOcrText: string,
@@ -93,8 +130,7 @@ export async function extractInvoiceData(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: systemContent },
         {
@@ -108,6 +144,7 @@ export async function extractInvoiceData(
       ),
     }),
   );
+  logUsage("text", completion);
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
@@ -127,8 +164,7 @@ export async function extractInvoiceDataFromImage(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: systemContent },
         {
@@ -151,6 +187,7 @@ export async function extractInvoiceDataFromImage(
       ),
     }),
   );
+  logUsage("vision", completion);
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
@@ -196,8 +233,7 @@ export async function supplementFiscalAuthFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: FISCAL_AUTH_VISION_PROMPT },
         { role: "user", content: userContent },
@@ -208,6 +244,7 @@ export async function supplementFiscalAuthFromImages(
       ),
     }),
   );
+  logUsage("fiscal_auth", completion);
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed?.fiscal_auth_type) return null;
@@ -255,8 +292,7 @@ export async function extractInvoiceDataFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: systemContent },
         { role: "user", content: userContent },
@@ -267,6 +303,7 @@ export async function extractInvoiceDataFromImages(
       ),
     }),
   );
+  logUsage("vision_multi", completion);
 
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) {
@@ -319,8 +356,7 @@ export async function supplementAmountsFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: AMOUNTS_SUPPLEMENT_VISION_PROMPT },
         { role: "user", content: userContent },
@@ -331,6 +367,7 @@ export async function supplementAmountsFromImages(
       ),
     }),
   );
+  logUsage("amounts", completion);
 
   return completion.choices[0]?.message?.parsed ?? null;
 }
@@ -377,8 +414,7 @@ export async function supplementDiscountFromImages(
 
   const completion = await withOpenAIRetry(() =>
     openai.beta.chat.completions.parse({
-      model: getOpenAIModel(),
-      temperature: EXTRACTION_TEMPERATURE,
+      ...modelParams(),
       messages: [
         { role: "system", content: DISCOUNT_SUPPLEMENT_VISION_PROMPT },
         { role: "user", content: userContent },
@@ -389,6 +425,7 @@ export async function supplementDiscountFromImages(
       ),
     }),
   );
+  logUsage("discount", completion);
 
   return completion.choices[0]?.message?.parsed ?? null;
 }

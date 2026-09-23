@@ -5,6 +5,7 @@ import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { HistoryList } from "@/components/history-list";
 import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import {
   buildHistoryWhere,
   hasActiveHistoryFilters,
@@ -36,6 +37,7 @@ export default async function HistoryPage({
   if (!session?.user?.id) {
     redirect("/iniciar-sesion");
   }
+  await expireStaleProcessingInvoices(session.user.id);
 
   const query = await searchParams;
   const searchQuery = (query.q ?? "").trim();
