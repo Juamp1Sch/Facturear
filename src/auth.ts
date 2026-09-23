@@ -37,23 +37,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const parsed = LoginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const [{ prisma }, bcrypt] = await Promise.all([
+        const [{ prisma }, bcrypt, rateLimit] = await Promise.all([
           import("@/lib/db"),
           import("bcryptjs"),
+          import("@/lib/rate-limit"),
         ]);
 
         const email = parsed.data.email.toLowerCase();
+        // Límite por email acá (y no solo en la server action) porque el endpoint
+        // /api/auth/callback/credentials también llega a authorize().
+        const emailKey = rateLimit.loginEmailKey(email);
+        if (
+          (await rateLimit.rateLimitRemainingMs(emailKey, rateLimit.LOGIN_EMAIL_RULE)) > 0
+        ) {
+          return null;
+        }
+
         const user = await prisma.user.findUnique({
           where: { email },
         });
-        if (!user?.passwordHash) return null;
+        if (!user?.passwordHash) {
+          await rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE);
+          return null;
+        }
 
         const ok = await bcrypt.default.compare(
           parsed.data.password,
           user.passwordHash,
         );
-        if (!ok) return null;
+        if (!ok) {
+          await rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE);
+          return null;
+        }
         if (!user.emailVerifiedAt) return null;
+        await rateLimit.clearRateLimit(emailKey);
 
         return { id: user.id, email: user.email, name: user.name };
       },

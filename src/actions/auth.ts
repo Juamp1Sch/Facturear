@@ -19,6 +19,19 @@ import {
   sendRegistrationApprovalEmail,
 } from "@/lib/email";
 import {
+  ACCOUNT_REQUEST_IP_RULE,
+  LOGIN_EMAIL_RULE,
+  LOGIN_IP_RULE,
+  accountRequestIpKey,
+  getClientIp,
+  loginEmailKey,
+  loginIpKey,
+  rateLimitMessage,
+  rateLimitRemainingMs,
+  recordRateLimitHit,
+} from "@/lib/rate-limit";
+import { safeCallbackUrl } from "@/lib/safe-callback-url";
+import {
   generateVerificationToken,
   hashVerificationToken,
   passwordResetTokenExpiresAt,
@@ -28,6 +41,15 @@ import {
 
 const PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE =
   "Si tu cuenta es válida, el administrador recibirá un código de restablecimiento. Pedilo para continuar. El código vence en 12 horas.";
+
+/** Aplica el límite de solicitudes por IP a registro/reset (cada una manda un mail). */
+async function accountRequestLimited(): Promise<string | null> {
+  const key = accountRequestIpKey(await getClientIp());
+  const remaining = await rateLimitRemainingMs(key, ACCOUNT_REQUEST_IP_RULE);
+  if (remaining > 0) return rateLimitMessage(remaining);
+  await recordRateLimitHit(key, ACCOUNT_REQUEST_IP_RULE);
+  return null;
+}
 
 function isNextRedirect(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
@@ -82,9 +104,24 @@ export async function register(
 
   const email = parsed.data.email.toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
+  if (existing?.emailVerifiedAt) {
     return { message: "Ese mail ya ha sido utilizado por otro usuario." };
   }
+  // Solicitud pendiente todavía vigente: no se pisa (evita que un tercero cambie la
+  // contraseña de un registro ajeno). Si ya venció, se permite volver a registrarse.
+  if (
+    existing &&
+    existing.verificationTokenExpiresAt &&
+    existing.verificationTokenExpiresAt >= new Date()
+  ) {
+    return {
+      message:
+        "Ya hay una solicitud de registro pendiente para este email. Pedile el código de activación al administrador.",
+    };
+  }
+
+  const limited = await accountRequestLimited();
+  if (limited) return { message: limited };
 
   const token = generateVerificationToken();
   const tokenHash = hashVerificationToken(token);
@@ -106,16 +143,29 @@ export async function register(
     };
   }
 
-  await prisma.user.create({
-    data: {
-      name: parsed.data.name,
-      email,
-      passwordHash,
-      emailVerifiedAt: null,
-      verificationTokenHash: tokenHash,
-      verificationTokenExpiresAt: expiresAt,
-    },
-  });
+  if (existing) {
+    // Registro previo sin activar y con el código vencido: se renueva la solicitud.
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        name: parsed.data.name,
+        passwordHash,
+        verificationTokenHash: tokenHash,
+        verificationTokenExpiresAt: expiresAt,
+      },
+    });
+  } else {
+    await prisma.user.create({
+      data: {
+        name: parsed.data.name,
+        email,
+        passwordHash,
+        emailVerifiedAt: null,
+        verificationTokenHash: tokenHash,
+        verificationTokenExpiresAt: expiresAt,
+      },
+    });
+  }
 
   return {
     success: true,
@@ -211,6 +261,16 @@ export async function login(
   }
 
   const email = parsed.data.email.toLowerCase();
+  const ipKey = loginIpKey(await getClientIp());
+  const [emailRemaining, ipRemaining] = await Promise.all([
+    rateLimitRemainingMs(loginEmailKey(email), LOGIN_EMAIL_RULE),
+    rateLimitRemainingMs(ipKey, LOGIN_IP_RULE),
+  ]);
+  const blockedMs = Math.max(emailRemaining, ipRemaining);
+  if (blockedMs > 0) {
+    return { message: rateLimitMessage(blockedMs) };
+  }
+
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (user?.passwordHash) {
@@ -231,10 +291,12 @@ export async function login(
     await signIn("credentials", {
       email: parsed.data.email,
       password: parsed.data.password,
-      redirectTo: "/upload",
+      redirectTo: safeCallbackUrl(formData.get("callbackUrl")),
     });
   } catch (e) {
     if (isNextRedirect(e)) throw e;
+    // El fallo por email lo registra authorize(); acá se suma el de la IP.
+    await recordRateLimitHit(ipKey, LOGIN_IP_RULE);
     return { message: "Email o contraseña incorrectos." };
   }
   return undefined;
@@ -265,6 +327,9 @@ export async function requestPasswordReset(
       errors: parsed.error.flatten().fieldErrors,
     };
   }
+
+  const limited = await accountRequestLimited();
+  if (limited) return { message: limited };
 
   const email = parsed.data.email.toLowerCase();
   const user = await prisma.user.findUnique({ where: { email } });
