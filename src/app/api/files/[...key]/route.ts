@@ -30,7 +30,12 @@ export async function GET(
   const key = decodeURIComponent(joined);
 
   const allowedPrefix = `invoices/${session.user.id}/`;
-  if (!key.startsWith(allowedPrefix)) {
+  // Rechaza segmentos ".." / "." y barras invertidas: el chequeo de prefijo se hace sobre
+  // la key cruda y path.resolve podría llevarla a la carpeta de otro usuario.
+  const hasTraversal = key
+    .split(/[\\/]/)
+    .some((segment) => segment === ".." || segment === ".");
+  if (!key.startsWith(allowedPrefix) || hasTraversal || key.includes("\\")) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
