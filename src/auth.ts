@@ -33,7 +33,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const parsed = LoginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
@@ -44,20 +44,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         ]);
 
         const email = parsed.data.email.toLowerCase();
-        // Límite por email acá (y no solo en la server action) porque el endpoint
-        // /api/auth/callback/credentials también llega a authorize().
+        // Límites acá (y no solo en la server action) porque el endpoint
+        // /api/auth/callback/credentials también llega a authorize(). signIn() desde la
+        // action reenvía los headers originales, así que la IP es la del cliente en ambos casos.
         const emailKey = rateLimit.loginEmailKey(email);
-        if (
-          (await rateLimit.rateLimitRemainingMs(emailKey, rateLimit.LOGIN_EMAIL_RULE)) > 0
-        ) {
-          return null;
-        }
+        const ipKey = rateLimit.loginIpKey(rateLimit.clientIpFromHeaders(request.headers));
+        const [emailBlocked, ipBlocked] = await Promise.all([
+          rateLimit.rateLimitRemainingMs(emailKey, rateLimit.LOGIN_EMAIL_RULE),
+          rateLimit.rateLimitRemainingMs(ipKey, rateLimit.LOGIN_IP_RULE),
+        ]);
+        if (emailBlocked > 0 || ipBlocked > 0) return null;
+
+        const recordFailure = () =>
+          Promise.all([
+            rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE),
+            rateLimit.recordRateLimitHit(ipKey, rateLimit.LOGIN_IP_RULE),
+          ]);
 
         const user = await prisma.user.findUnique({
           where: { email },
         });
         if (!user?.passwordHash) {
-          await rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE);
+          await recordFailure();
           return null;
         }
 
@@ -66,7 +74,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.passwordHash,
         );
         if (!ok) {
-          await rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE);
+          await recordFailure();
           return null;
         }
         if (!user.emailVerifiedAt) return null;

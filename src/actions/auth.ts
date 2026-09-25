@@ -295,8 +295,7 @@ export async function login(
     });
   } catch (e) {
     if (isNextRedirect(e)) throw e;
-    // El fallo por email lo registra authorize(); acá se suma el de la IP.
-    await recordRateLimitHit(ipKey, LOGIN_IP_RULE);
+    // Los fallos (por email y por IP) los registra authorize(); acá solo se informa.
     return { message: "Email o contraseña incorrectos." };
   }
   return undefined;
