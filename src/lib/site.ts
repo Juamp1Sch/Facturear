@@ -20,4 +20,7 @@ export const PRIVATE_PATHS = [
   "/carga-proveedores",
   "/api-config",
   "/api/",
+  // Flujos de auth con códigos: sin valor para buscadores.
+  "/verificar-cuenta",
+  "/restablecer-contrasena",
 ];

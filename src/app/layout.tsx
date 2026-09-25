@@ -29,7 +29,8 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    url: "/",
+    // Sin `url` acá: el layout raíz lo heredan todas las páginas y og:url quedaría
+    // apuntando a la home en /registrarse, /iniciar-sesion, etc.
   },
   twitter: {
     card: "summary_large_image",
