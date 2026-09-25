@@ -5,6 +5,7 @@ import { LoginForm } from "@/components/login-form";
 export const metadata = {
   title: "Iniciar sesión — AgileScan",
   description: "Accedé a tu cuenta de AgileScan.",
+  alternates: { canonical: "/iniciar-sesion" },
 };
 
 export default function IniciarSesionPage() {

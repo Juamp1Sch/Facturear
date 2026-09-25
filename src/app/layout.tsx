@@ -3,6 +3,7 @@ import { JetBrains_Mono, Nunito } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 
 import { SiteHeader } from "@/components/site-header";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const nunito = Nunito({
@@ -18,9 +19,24 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AgileScan - Lector de facturas",
-  description:
-    "Subí facturas (PDF o foto): visión OpenAI en fotos, texto en PDF y extracción con IA.",
+  metadataBase: new URL(SITE_URL),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    type: "website",
+    locale: "es_AR",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    // Sin `url` acá: el layout raíz lo heredan todas las páginas y og:url quedaría
+    // apuntando a la home en /registrarse, /iniciar-sesion, etc.
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

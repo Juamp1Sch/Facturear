@@ -3,6 +3,7 @@ import { RegisterForm } from "@/components/register-form";
 export const metadata = {
   title: "Registrarse — AgileScan",
   description: "Creá tu cuenta en AgileScan.",
+  alternates: { canonical: "/registrarse" },
 };
 
 export default function RegistrarsePage() {

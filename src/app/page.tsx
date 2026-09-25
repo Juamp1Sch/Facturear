@@ -1,10 +1,41 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { FileText, History, Sparkles } from "lucide-react";
 
 import { LandingFaq } from "@/components/landing-faq";
 import { buttonVariants } from "@/components/ui/button";
-import { landingFaqJsonLd } from "@/lib/landing-faq-data";
+import { CONTACT_EMAIL, landingFaqJsonLd } from "@/lib/landing-faq-data";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
+
+/** Datos estructurados del producto (Google: Organization + SoftwareApplication). */
+function productJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        name: SITE_NAME,
+        url: SITE_URL,
+        logo: `${SITE_URL}/brand/logo-header.png`,
+        email: CONTACT_EMAIL,
+      },
+      {
+        "@type": "SoftwareApplication",
+        name: SITE_NAME,
+        url: SITE_URL,
+        applicationCategory: "BusinessApplication",
+        operatingSystem: "Web",
+        inLanguage: "es-AR",
+        description: SITE_DESCRIPTION,
+      },
+    ],
+  };
+}
 
 export default function LandingPage() {
   return (
@@ -18,8 +49,8 @@ export default function LandingPage() {
             Subí, extraé y organizá tus facturas con IA
           </h1>
           <p className="mx-auto mb-8 max-w-xl text-lg text-muted-foreground">
-            AgileScan lee PDFs y fotos, completa los datos clave y te deja un historial
-            propio: cada usuario ve solo lo suyo.
+            AgileScan lee facturas y remitos en PDF o foto, extrae CUIT, importes, IVA,
+            percepciones y CAE, y te deja todo listo para la carga contable.
           </p>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
@@ -54,7 +85,7 @@ export default function LandingPage() {
               Subí PDF o foto
             </h3>
             <p className="text-sm text-muted-foreground">
-              Arrastrá y soltá o elegí archivo. PDF con texto, JPG o PNG hasta 10 MB.
+              Arrastrá y soltá o elegí archivo: PDF (digital o escaneado), JPG o PNG.
             </p>
           </li>
           <li className="rounded-2xl border border-border bg-card p-6 shadow-sm">
@@ -102,6 +133,12 @@ export default function LandingPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify(landingFaqJsonLd()),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(productJsonLd()),
         }}
       />
     </div>
