@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { unstable_rethrow } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import { useFormStatus } from "react-dom";
 import {
@@ -113,7 +114,10 @@ async function submitBatchInChunks(
     let res: UploadBatchState;
     try {
       res = await uploadInvoiceBatch({ status: "idle" }, fd);
-    } catch {
+    } catch (e) {
+      // Si la sesión venció, la action redirige al login: en el cliente eso llega como
+      // un error de redirect que tiene que seguir subiendo hasta el RedirectBoundary.
+      unstable_rethrow(e);
       res = {
         status: "error",
         message: "No se pudo completar la subida (error de red o del servidor).",

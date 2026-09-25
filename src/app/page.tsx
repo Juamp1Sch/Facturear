@@ -54,7 +54,7 @@ export default function LandingPage() {
               Subí PDF o foto
             </h3>
             <p className="text-sm text-muted-foreground">
-              Arrastrá y soltá o elegí archivo. PDF (digital o escaneado), JPG o PNG, en lotes de hasta 10 archivos.
+              Arrastrá y soltá o elegí archivo: PDF (digital o escaneado), JPG o PNG.
             </p>
           </li>
           <li className="rounded-2xl border border-border bg-card p-6 shadow-sm">

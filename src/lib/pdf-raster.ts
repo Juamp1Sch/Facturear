@@ -11,7 +11,8 @@ export const PDF_VISION_MAX_PAGES = Math.max(
 /**
  * Páginas del PDF como PNG (para PDFs escaneados sin capa de texto).
  * Si el PDF supera `maxPages`, se toman las primeras `maxPages - 1` y la ÚLTIMA,
- * porque ahí suelen estar los totales y el CAE/CAI.
+ * porque ahí suelen estar los totales y el CAE/CAI. Con `maxPages = 1` se usa la
+ * primera (la cabecera con CUIT y número es indispensable).
  */
 export async function rasterizePdfPagesPng(
   buffer: Buffer,
@@ -26,7 +27,9 @@ export async function rasterizePdfPagesPng(
   const pageNumbers =
     total <= maxPages
       ? Array.from({ length: total }, (_, i) => i + 1)
-      : [...Array.from({ length: maxPages - 1 }, (_, i) => i + 1), total];
+      : maxPages === 1
+        ? [1]
+        : [...Array.from({ length: maxPages - 1 }, (_, i) => i + 1), total];
 
   const pages: Buffer[] = [];
   for (const n of pageNumbers) {
