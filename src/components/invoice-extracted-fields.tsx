@@ -34,6 +34,8 @@ import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
+import { readExtractionReview } from "@/lib/extraction-v2/review";
+import { ReviewBadge } from "@/components/review-badge";
 import type { DocumentKind } from "@/lib/comprobante-code";
 import { parseDiscountFromPayload, parseTaxBreakdownFromPayload, needsPerceptionBreakdownWarning } from "@/lib/tax-breakdown";
 import { groupVatLinesByRate, getVatAmountForCode } from "@/lib/vat-rate";
@@ -399,6 +401,13 @@ export function InvoiceExtractedFields({
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
+  // Tras una edición manual (CORRECTED) los datos ya los confirmó una persona: no se marcan.
+  const extractionReview =
+    invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
+  const reviewFields = extractionReview?.fields ?? {};
+  const generalReviewReasons = [reviewFields.fiscal_auth, reviewFields.extraction].filter(
+    (r): r is string => Boolean(r),
+  );
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
   const discountBreakdown = parseDiscountFromPayload(
     invoice.aiPayload,
@@ -466,6 +475,31 @@ export function InvoiceExtractedFields({
         {error ? (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
+          </div>
+        ) : null}
+
+        {extractionReview?.verifiedBy ? (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
+            CUIT, fecha, número, total y CAE verificados con el{" "}
+            {extractionReview.verifiedBy === "QR" ? "QR" : "código de barras"} de ARCA del
+            comprobante.
+          </div>
+        ) : null}
+
+        {extractionReview?.cuitCorrection ? (
+          <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            CUIT corregido con tu maestro de proveedores (
+            {extractionReview.cuitCorrection.supplierName}): se leyó{" "}
+            {extractionReview.cuitCorrection.from ?? "—"} y se usó{" "}
+            {extractionReview.cuitCorrection.to}.
+          </div>
+        ) : null}
+
+        {generalReviewReasons.length > 0 ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            {generalReviewReasons.map((reason) => (
+              <p key={reason}>Revisar: {reason}</p>
+            ))}
           </div>
         ) : null}
 
@@ -890,7 +924,10 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">CUIT</dt>
-              <dd className="text-sm break-words">{invoice.providerCuit ?? "—"}</dd>
+              <dd className="text-sm break-words">
+                {invoice.providerCuit ?? "—"}
+                {reviewFields.cuit ? <ReviewBadge reason={reviewFields.cuit} /> : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Código proveedor</dt>
@@ -904,11 +941,21 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Fecha</dt>
-              <dd className="text-sm">{dateStr}</dd>
+              <dd className="text-sm">
+                {dateStr}
+                {reviewFields.invoice_date ? (
+                  <ReviewBadge reason={reviewFields.invoice_date} />
+                ) : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Nº comprobante</dt>
-              <dd className="text-sm break-words">{invoice.invoiceNumber ?? "—"}</dd>
+              <dd className="text-sm break-words">
+                {invoice.invoiceNumber ?? "—"}
+                {reviewFields.invoice_number ? (
+                  <ReviewBadge reason={reviewFields.invoice_number} />
+                ) : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Tipo (letra)</dt>
@@ -1065,7 +1112,10 @@ export function InvoiceExtractedFields({
             ) : null}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Total</dt>
-              <dd className="text-sm font-medium">{formatMoney(invoice.totalAmount)}</dd>
+              <dd className="text-sm font-medium">
+                {formatMoney(invoice.totalAmount)}
+                {reviewFields.amounts ? <ReviewBadge reason={reviewFields.amounts} /> : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Cuenta</dt>

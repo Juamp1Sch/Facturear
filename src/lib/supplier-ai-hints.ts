@@ -31,3 +31,14 @@ export async function loadSupplierMaestroCuitHintsBlock(
   }
   return `${header}${body}`.trimEnd();
 }
+
+/** Proveedores con CUIT del usuario, para corregir el CUIT leído (extraction-v2/maestro-cuit). */
+export async function loadSupplierMaestroForCuitMatch(
+  userId: string,
+): Promise<{ cuit: string; name: string }[]> {
+  const rows = await prisma.supplier.findMany({
+    where: { userId, cuit: { not: null } },
+    select: { name: true, cuit: true },
+  });
+  return rows.filter((r): r is { name: string; cuit: string } => Boolean(r.cuit));
+}

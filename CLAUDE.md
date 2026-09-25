@@ -167,12 +167,13 @@ Upload → Guardar archivo → Extraer texto/visión → Parse OpenAI → Match 
 | 1. Guardar | `src/lib/storage.ts` | S3 → Neon `stored_files` → local `.data/uploads/` |
 | 2. Texto PDF | `src/lib/ocr.ts` → `src/lib/pdf-text.ts` | `pdf-parse` para texto embebido |
 | 3. Raster PDF | `src/lib/pdf-raster.ts` | `pdf-to-img` + `@napi-rs/canvas` para PDFs escaneados |
-| 4. Extracción IA | `src/lib/ai.ts` | OpenAI texto + visión, parse estructurado con Zod |
+| 4. Extracción IA | `src/lib/extraction-v2/pipeline.ts` → `src/lib/ai.ts` | Pipeline v2 (GPT-6 Luna): QR/código de barras de ARCA decodificado en código (datos exactos), 1 llamada con páginas en resolución original + ampliaciones de cabecera/pie, validación (dígito verificador, suma, CAE, fecha) y 2da pasada solo si falla; CUIT contrastado con el maestro de proveedores; lo no verificado queda en `aiPayload.review` y la UI lo marca "Revisar". `EXTRACTION_PIPELINE=legacy` vuelve al pipeline de varias pasadas de gpt-4o |
 | 5. Match proveedor | `src/lib/supplier-match.ts` | Matching por CUIT + alias |
 | 6. Cuenta contable | `src/lib/chart-account-match.ts` | Resolución de cuenta |
 | 7. Subida ERP | `src/actions/integration-upload.ts` | POST JSON contable con `X-Auth-Token` |
 
-- **Schemas IA:** `src/lib/schemas.ts` (Zod).
+- **Schemas IA:** `src/lib/schemas.ts` (Zod); v2 usa `invoiceExtractionSchemaV2` (mismos campos, descripciones sin números de ejemplo: los modelos los copiaban).
+- **Evaluación:** los cambios de extracción se miden contra un set de facturas reales con respuesta correcta (campos correctos, documentos perfectos, errores silenciosos, latencia). No hay set en el repo (datos reales); pedirle al usuario la carpeta de pruebas.
 - **Retry:** `src/lib/openai-retry.ts` (wrapper de rate-limit).
 - **Serialización:** `src/lib/serialize-invoice.ts`, `src/lib/invoice-json.ts`.
 
