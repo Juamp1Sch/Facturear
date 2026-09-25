@@ -284,7 +284,18 @@ Referencia completa en `.env.example`. Críticas:
 - **DB:** Neon PostgreSQL (usar URL pooled en Vercel).
 - **Files:** AWS S3 en producción; Neon `stored_files` o disco local como fallback.
 - **Dominio:** [agilescan.com.ar](https://agilescan.com.ar).
-- **Migraciones:** `prisma migrate deploy` en CI/CD o manual después del merge.
+- **Migraciones:** se aplican **solas** en el build de producción de Vercel
+  (`scripts/migrate-on-deploy.mjs`, entre `prisma generate` y `next build`, por la conexión
+  directa `DATABASE_URL_UNPOOLED`). Previews y builds locales no migran. Si la migración falla,
+  el build falla y queda el deploy anterior.
+  - Toda migración debe ser **compatible con el código que está en producción**: se aplica
+    antes de que salga el código nuevo. Nada de `DROP`/`RENAME`/`SET NOT NULL` en el mismo
+    deploy que deja de usar la columna: separarlo en dos PRs.
+  - Nunca editar una migración ya mergeada: crear una nueva.
+  - La action `Prisma migrations check` aplica todas las migraciones sobre un Postgres vacío,
+    falla si `schema.prisma` tiene cambios sin migración (drift) y comenta/etiqueta
+    (`has: migration`) las PRs que traen migraciones.
+  - `20260501000000_baseline` representa las tablas creadas originalmente con `db push`.
 
 ## Prioridades al hacer code review
 

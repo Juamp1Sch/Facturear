@@ -1,0 +1,161 @@
+name: Prisma migrations check
+
+# En cada PR que toque Prisma: aplica TODAS las migraciones sobre un Postgres vacío y compara
+# el resultado con schema.prisma. Falla si el schema cambió sin migración (drift). Además
+# comenta qué migraciones nuevas trae la PR: al mergear se aplican solas en el deploy a
+# producción (scripts/migrate-on-deploy.mjs), así que conviene revisarlas acá.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "prisma/**"
+      - "package.json"
+      - "scripts/migrate-on-deploy.mjs"
+      - ".github/workflows/prisma-migrations.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: facturear_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/facturear_ci?schema=public
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Apply all migrations on an empty database
+        run: npx prisma migrate deploy
+
+      - name: Compare migrated database with schema.prisma
+        id: drift
+        run: |
+          set +e
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script --exit-code > drift.sql
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = "1" ]; then
+            echo "prisma migrate diff falló" >&2
+            exit 1
+          fi
+
+      - name: Build PR comment
+        id: comment
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DRIFT_CODE: ${{ steps.drift.outputs.code }}
+        run: |
+          # base.sha (y no origin/<base>): no depende de qué refs remotas trajo el checkout.
+          new=$(git diff --name-only --diff-filter=A "$BASE_SHA...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
+          changed=$(git diff --name-only --diff-filter=M "$BASE_SHA...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
+          {
+            echo "<!-- prisma-migrations-check -->"
+            echo "## Migraciones de Prisma"
+            echo
+            if [ -z "$new" ]; then
+              echo "Esta PR **no trae migraciones nuevas**."
+            else
+              echo "Esta PR trae migraciones nuevas. **Al mergear se aplican solas** en el deploy a producción (\`scripts/migrate-on-deploy.mjs\`, antes de \`next build\`):"
+              echo
+              for f in $new; do echo "- \`$(basename "$(dirname "$f")")\`"; done
+              danger=$(grep -niE 'DROP[[:space:]]+(TABLE|COLUMN|TYPE|INDEX)|TRUNCATE|DELETE[[:space:]]+FROM|ALTER[[:space:]]+COLUMN[^;]*TYPE|SET[[:space:]]+NOT[[:space:]]+NULL|RENAME[[:space:]]+(COLUMN|TO)' $new || true)
+              if [ -n "$danger" ]; then
+                echo
+                echo "> [!WARNING]"
+                echo "> Hay operaciones **destructivas o incompatibles con el código que está en producción**. Como se aplican antes de que salga el código nuevo, revisá que sean seguras (o separalas en dos deploys):"
+                echo
+                echo '```'
+                echo "$danger"
+                echo '```'
+              fi
+            fi
+            if [ -n "$changed" ]; then
+              echo
+              echo "> [!CAUTION]"
+              echo "> Se **modificaron migraciones existentes**. Si ya se aplicaron en producción, Prisma no las vuelve a correr y el checksum no coincide: creá una migración nueva en su lugar."
+              echo
+              for f in $changed; do echo "- \`$f\`"; done
+            fi
+            echo
+            if [ "$DRIFT_CODE" = "0" ]; then
+              echo "✅ Las migraciones reproducen exactamente \`schema.prisma\` (sin drift)."
+            else
+              echo "❌ **Drift:** \`schema.prisma\` tiene cambios que ninguna migración crea. Generá la migración con \`npm run db:migrate\`. SQL faltante:"
+              echo
+              echo '```sql'
+              cat drift.sql
+              echo '```'
+            fi
+          } > comment.md
+          if [ -n "$new" ]; then echo "has_new=true" >> "$GITHUB_OUTPUT"; else echo "has_new=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Post or update PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- prisma-migrations-check -->")) | .id' | head -n1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file comment.md
+          fi
+
+      - name: Label PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HAS_NEW: ${{ steps.comment.outputs.has_new }}
+        run: |
+          gh label create "has: migration" --repo "$REPO" --color "0e8a16" \
+            --description "Trae migraciones de Prisma (se aplican solas al deployar a producción)" --force
+          if [ "$HAS_NEW" = "true" ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "has: migration"
+          else
+            gh pr edit "$PR" --repo "$REPO" --remove-label "has: migration" || true
+          fi
+
+      - name: Fail on drift
+        if: steps.drift.outputs.code == '2'
+        run: |
+          echo "schema.prisma tiene cambios sin migración (ver comentario en la PR)." >&2
+          exit 1

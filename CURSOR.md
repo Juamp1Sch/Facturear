@@ -320,4 +320,13 @@ Full reference in `.env.example`. Critical vars:
 - **Database:** Neon PostgreSQL (use pooled URL on Vercel)
 - **Files:** AWS S3 in production; Neon `stored_files` or local disk as fallback
 - **Domain:** [agilescan.com.ar](https://agilescan.com.ar)
-- **Migrations:** Run `prisma migrate deploy` in CI/CD or manually after merge
+- **Migrations:** applied **automatically** in the Vercel production build
+  (`scripts/migrate-on-deploy.mjs`, between `prisma generate` and `next build`, over the direct
+  connection `DATABASE_URL_UNPOOLED`). Previews and local builds do not migrate; a failed
+  migration fails the build and keeps the previous deployment.
+  - Migrations must be **backwards-compatible with the code currently in production** (they run
+    before the new code goes live): no `DROP`/`RENAME`/`SET NOT NULL` in the same deploy that stops
+    using a column — split it across two PRs.
+  - Never edit a merged migration; create a new one.
+  - The `Prisma migrations check` workflow applies every migration to an empty Postgres, fails on
+    drift vs `schema.prisma`, and comments/labels (`has: migration`) PRs that add migrations.
