@@ -257,3 +257,13 @@ model CuitSucursal {
   @@index([userId, cuit])
   @@map("cuit_sucursales")
 }
+
+/// Contador de intentos fallidos por clave (ej. "login:email:x@y.com", "login:ip:1.2.3.4")
+/// en una ventana de tiempo. En Postgres porque en serverless no hay memoria compartida.
+model AuthRateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now()) @map("window_start")
+
+  @@map("auth_rate_limits")
+}

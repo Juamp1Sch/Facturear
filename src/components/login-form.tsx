@@ -30,6 +30,7 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const activated = searchParams.get("activada") === "1";
   const passwordReset = searchParams.get("contrasena") === "1";
+  const callbackUrl = searchParams.get("callbackUrl") ?? "";
   const [state, action] = useActionState(login, undefined);
 
   return (
@@ -41,6 +42,7 @@ export function LoginForm() {
         </CardDescription>
       </CardHeader>
       <form action={action} className="contents">
+        <input type="hidden" name="callbackUrl" value={callbackUrl} />
         <CardContent className="space-y-4">
           {activated ? (
             <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">

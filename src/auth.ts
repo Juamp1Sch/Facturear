@@ -33,27 +33,52 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const parsed = LoginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const [{ prisma }, bcrypt] = await Promise.all([
+        const [{ prisma }, bcrypt, rateLimit] = await Promise.all([
           import("@/lib/db"),
           import("bcryptjs"),
+          import("@/lib/rate-limit"),
         ]);
 
         const email = parsed.data.email.toLowerCase();
+        // Límites acá (y no solo en la server action) porque el endpoint
+        // /api/auth/callback/credentials también llega a authorize(). signIn() desde la
+        // action reenvía los headers originales, así que la IP es la del cliente en ambos casos.
+        const emailKey = rateLimit.loginEmailKey(email);
+        const ipKey = rateLimit.loginIpKey(rateLimit.clientIpFromHeaders(request.headers));
+        const [emailBlocked, ipBlocked] = await Promise.all([
+          rateLimit.rateLimitRemainingMs(emailKey, rateLimit.LOGIN_EMAIL_RULE),
+          rateLimit.rateLimitRemainingMs(ipKey, rateLimit.LOGIN_IP_RULE),
+        ]);
+        if (emailBlocked > 0 || ipBlocked > 0) return null;
+
+        const recordFailure = () =>
+          Promise.all([
+            rateLimit.recordRateLimitHit(emailKey, rateLimit.LOGIN_EMAIL_RULE),
+            rateLimit.recordRateLimitHit(ipKey, rateLimit.LOGIN_IP_RULE),
+          ]);
+
         const user = await prisma.user.findUnique({
           where: { email },
         });
-        if (!user?.passwordHash) return null;
+        if (!user?.passwordHash) {
+          await recordFailure();
+          return null;
+        }
 
         const ok = await bcrypt.default.compare(
           parsed.data.password,
           user.passwordHash,
         );
-        if (!ok) return null;
+        if (!ok) {
+          await recordFailure();
+          return null;
+        }
         if (!user.emailVerifiedAt) return null;
+        await rateLimit.clearRateLimit(emailKey);
 
         return { id: user.id, email: user.email, name: user.name };
       },

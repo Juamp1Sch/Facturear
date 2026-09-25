@@ -15,7 +15,10 @@ export default auth((req) => {
   ];
 
   if (protectedPrefixes.some((p) => path.startsWith(p)) && !isLoggedIn) {
-    return NextResponse.redirect(new URL("/iniciar-sesion", req.nextUrl));
+    const loginUrl = new URL("/iniciar-sesion", req.nextUrl);
+    // Para volver a la página pedida después de iniciar sesión (se valida en la action).
+    loginUrl.searchParams.set("callbackUrl", `${path}${req.nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
   }
   if (authPages.includes(path) && isLoggedIn) {
     return NextResponse.redirect(new URL("/upload", req.nextUrl));
