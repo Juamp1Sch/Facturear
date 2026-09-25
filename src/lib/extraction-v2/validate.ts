@@ -14,7 +14,12 @@ export type ReviewIssue = {
   retryHint?: string;
 };
 
-const TOLERANCE = 0.02;
+/**
+ * Estricta a propósito: solo cubre redondeos de IVA. La tolerancia del reconciliador (0,5% del
+ * total) dejaría pasar un dígito mal leído en un importe de 7 cifras (ej. 1.326.690,59 vs
+ * 1.325.690,59), que es justo el error típico del OCR del modelo.
+ */
+const TOLERANCE = 0.05;
 const CAE_DIGITS = 14;
 const MAX_FUTURE_DAYS = 2;
 
@@ -38,7 +43,10 @@ export function validateExtraction(
     if (Math.abs(sum - e.total_amount) > TOLERANCE) {
       issues.push({
         field: "amounts",
-        reason: `Neto + IVA + percepciones (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
+        reason:
+          fiscal?.total != null
+            ? `Neto + IVA + percepciones (${sum.toFixed(2)}) no coincide con el total del QR de ARCA (${e.total_amount.toFixed(2)}, exacto): revisá el desglose.`
+            : `Neto + IVA + percepciones (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
         retryHint: `Neto ${e.net_amount} + IVA ${e.vat_amount ?? 0} + percepciones ${e.perceptions_amount ?? 0} = ${sum.toFixed(2)}, pero el total es ${e.total_amount}. Releé los importes del recuadro de totales dígito por dígito en la ampliación del pie.`,
       });
     }

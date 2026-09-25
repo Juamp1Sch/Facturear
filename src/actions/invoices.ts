@@ -70,6 +70,7 @@ import {
 import { extractInvoiceV2 } from "@/lib/extraction-v2/pipeline";
 import type { MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import type { ExtractionReview } from "@/lib/extraction-v2/review";
+import { validateExtraction } from "@/lib/extraction-v2/validate";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -447,7 +448,22 @@ async function applyExtractionToInvoice(
   }
   aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
   if (options?.review) {
-    aiPayloadOut.review = options.review;
+    // La marca de importes se recalcula sobre los importes FINALES (la reconciliación pudo
+    // corregirlos), con la validación estricta de v2 y no con la tolerancia del reconciliador.
+    const amountsIssue = validateExtraction(
+      {
+        ...resolvedExtracted,
+        net_amount: finalized.netAmount,
+        vat_amount: finalized.vatAmount,
+        perceptions_amount: finalized.perceptionsAmount,
+        total_amount: finalized.totalAmount,
+      },
+      null,
+    ).find((issue) => issue.field === "amounts");
+    const reviewFields = { ...options.review.fields };
+    if (amountsIssue) reviewFields.amounts = amountsIssue.reason;
+    else delete reviewFields.amounts;
+    aiPayloadOut.review = { ...options.review, fields: reviewFields };
   }
   if (finalized.amountsDiscrepancy != null) {
     aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;

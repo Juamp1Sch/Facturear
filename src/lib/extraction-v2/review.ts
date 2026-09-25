@@ -4,7 +4,6 @@
  */
 export type ReviewFieldKey =
   | "cuit"
-  | "invoice_number"
   | "invoice_date"
   | "amounts"
   | "fiscal_auth"

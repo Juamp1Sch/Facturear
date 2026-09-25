@@ -952,9 +952,6 @@ export function InvoiceExtractedFields({
               <dt className="text-sm font-medium text-muted-foreground">Nº comprobante</dt>
               <dd className="text-sm break-words">
                 {invoice.invoiceNumber ?? "—"}
-                {reviewFields.invoice_number ? (
-                  <ReviewBadge reason={reviewFields.invoice_number} />
-                ) : null}
               </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">

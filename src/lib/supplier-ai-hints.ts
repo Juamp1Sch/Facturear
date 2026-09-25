@@ -32,6 +32,8 @@ export async function loadSupplierMaestroCuitHintsBlock(
   return `${header}${body}`.trimEnd();
 }
 
+const MAESTRO_MATCH_MAX_ROWS = 5000;
+
 /** Proveedores con CUIT del usuario, para corregir el CUIT leído (extraction-v2/maestro-cuit). */
 export async function loadSupplierMaestroForCuitMatch(
   userId: string,
@@ -39,6 +41,7 @@ export async function loadSupplierMaestroForCuitMatch(
   const rows = await prisma.supplier.findMany({
     where: { userId, cuit: { not: null } },
     select: { name: true, cuit: true },
+    take: MAESTRO_MATCH_MAX_ROWS,
   });
   return rows.filter((r): r is { name: string; cuit: string } => Boolean(r.cuit));
 }
