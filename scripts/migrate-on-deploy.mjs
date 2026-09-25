@@ -21,10 +21,12 @@ if (!directUrl) {
   console.error("[migrate-on-deploy] No hay DATABASE_URL_UNPOOLED / DIRECT_URL / DATABASE_URL.");
   process.exit(1);
 }
-if (directUrl === process.env.DATABASE_URL?.trim() && /-pooler\./.test(directUrl)) {
-  console.warn(
-    "[migrate-on-deploy] Usando la URL con pooler: configurá DATABASE_URL_UNPOOLED para migrar por conexión directa.",
+if (/-pooler\./.test(directUrl)) {
+  // Por el pooler (PgBouncer) `prisma migrate` falla de forma poco clara: mejor cortar acá.
+  console.error(
+    "[migrate-on-deploy] Solo hay una URL con pooler (-pooler.). Configurá DATABASE_URL_UNPOOLED (o DIRECT_URL) con la conexión directa de Neon en Vercel.",
   );
+  process.exit(1);
 }
 
 console.log("[migrate-on-deploy] Producción: aplicando migraciones pendientes (prisma migrate deploy)…");

@@ -78,11 +78,12 @@ jobs:
       - name: Build PR comment
         id: comment
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           DRIFT_CODE: ${{ steps.drift.outputs.code }}
         run: |
-          new=$(git diff --name-only --diff-filter=A "origin/$BASE_REF...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
-          changed=$(git diff --name-only --diff-filter=M "origin/$BASE_REF...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
+          # base.sha (y no origin/<base>): no depende de qué refs remotas trajo el checkout.
+          new=$(git diff --name-only --diff-filter=A "$BASE_SHA...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
+          changed=$(git diff --name-only --diff-filter=M "$BASE_SHA...HEAD" -- 'prisma/migrations/*/migration.sql' | sort)
           {
             echo "<!-- prisma-migrations-check -->"
             echo "## Migraciones de Prisma"
