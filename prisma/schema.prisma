@@ -91,6 +91,8 @@ model Invoice {
   files               InvoiceFile[]
 
   @@index([batchId])
+  /// Historial y liberación de facturas trabadas (expireStaleProcessingInvoices) filtran por usuario + estado.
+  @@index([userId, status])
 }
 
 model InvoiceFile {
