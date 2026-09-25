@@ -7,6 +7,7 @@ import { DatabaseSetupCard } from "@/components/database-setup-card";
 import { InvoiceDetail } from "@/components/invoice-detail";
 import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import { resolveTaxChartAccountsForUser } from "@/lib/tax-chart-account";
 import { getSignedReadUrl } from "@/lib/storage";
 import { resolveEmpresaSucursalForInvoice } from "@/lib/cuit-associations";
@@ -36,6 +37,7 @@ export default async function InvoiceDetailPage({
   if (!session?.user?.id) {
     redirect("/iniciar-sesion");
   }
+  await expireStaleProcessingInvoices(session.user.id);
 
   const { id } = await params;
   const query = await searchParams;

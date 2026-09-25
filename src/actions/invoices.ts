@@ -9,7 +9,6 @@ import { auth } from "@/auth";
 import { isApiConfiguredForUser } from "@/actions/api-config";
 import {
   extractInvoiceData,
-  extractInvoiceDataFromImage,
   extractInvoiceDataFromImages,
 } from "@/lib/ai";
 import {
@@ -47,6 +46,7 @@ import {
 import type { SerializedBatchInvoice } from "@/types/invoice";
 import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
+import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import {
   normalizeArgentineCuitFromAiOrNull,
   validateArgentineCuitForEntry,
@@ -66,7 +66,7 @@ import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account
 import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
-import { rasterizePdfFirstPagePng } from "@/lib/pdf-raster";
+import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
 import { buildMovementId } from "@/lib/movement-id";
 import { parseDocumentKind } from "@/lib/comprobante-code";
 import {
@@ -78,6 +78,8 @@ import { formatOpenAIExtractionError } from "@/lib/openai-retry";
 import { readInvoiceFile, uploadBuffer } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BATCH_MAX_FILES = Number(process.env.BATCH_MAX_FILES ?? "10") || 10;
 /**
  * Facturas procesadas en paralelo. En Tier 1 de OpenAI (gpt-4o = 30.000 TPM) el cuello
@@ -264,8 +266,10 @@ async function extractFromParts(
       if (!pdfEmbeddedTextIsWeak(pdfText)) {
         ocrNotes.push(`--- Parte ${i + 1} (PDF texto) ---\n${pdfText.slice(0, 8000)}`);
       }
-      const pagePng = await rasterizePdfFirstPagePng(part.buffer);
-      visionImages.push({ buffer: pagePng, mimeType: "image/png" });
+      const pagePngs = await rasterizePdfPagesPng(part.buffer);
+      for (const pagePng of pagePngs) {
+        visionImages.push({ buffer: pagePng, mimeType: "image/png" });
+      }
     } else {
       visionImages.push({
         buffer: part.buffer,
@@ -488,6 +492,7 @@ async function processInvoiceGroup(
       originalFileKey: first.key,
       mimeType: first.mimeType,
       status: "PROCESSING",
+      processingStartedAt: new Date(),
       files: {
         create: uploadedParts.map((p, partIndex) => ({
           partIndex,
@@ -613,272 +618,6 @@ function extForMime(mime: string): string {
   }
 }
 
-export async function uploadInvoice(formData: FormData) {
-  if (!isDatabaseConfigured()) {
-    throw new Error(
-      "Falta DATABASE_URL en .env. Configurá PostgreSQL y reiniciá el servidor (ver instrucciones en /upload).",
-    );
-  }
-
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    throw new Error("No se recibió ningún archivo.");
-  }
-
-  if (file.size > MAX_BYTES) {
-    throw new Error("El archivo supera los 10 MB.");
-  }
-
-  const session = await auth();
-  if (!session?.user?.id) {
-    redirect("/iniciar-sesion");
-  }
-  const userId = session.user.id;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const mimeType = resolveInvoiceMimeType(file, buffer);
-  if (!mimeType) {
-    throw new Error(
-      "Solo se permiten PDF, JPG o PNG. Si es un JPEG, probá renombrar a .jpg o .jpeg.",
-    );
-  }
-  const ext = extForMime(mimeType);
-  const key = `invoices/${userId}/${randomUUID()}.${ext}`;
-
-  const uploaded = await uploadBuffer({ key, buffer, contentType: mimeType });
-
-  const invoice = await prisma.invoice.create({
-    data: {
-      userId,
-      originalFileUrl: uploaded.publicUrl,
-      originalFileKey: uploaded.key,
-      mimeType,
-      status: "PROCESSING",
-      files: {
-        create: {
-          partIndex: 0,
-          fileKey: uploaded.key,
-          fileUrl: uploaded.publicUrl,
-          mimeType,
-        },
-      },
-    },
-  });
-
-  try {
-    const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
-      loadSupplierMaestroCuitHintsBlock(userId),
-      loadChartAccountHintsBlock(userId),
-    ]);
-    const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
-
-    let rawOcrText: string | null = null;
-    let extracted: InvoiceExtraction;
-    let visionImages:
-      | { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[]
-      | undefined;
-
-    if (mimeType === "application/pdf") {
-      const pdfText = await runOcr(buffer, mimeType);
-      if (pdfEmbeddedTextIsWeak(pdfText)) {
-        const pagePng = await rasterizePdfFirstPagePng(buffer);
-        const [preprocessed] = await preprocessVisionImages([
-          { buffer: pagePng, mimeType: "image/png" },
-        ]);
-        visionImages = [preprocessed];
-        extracted = await extractInvoiceDataFromImage(
-          preprocessed.buffer,
-          preprocessed.mimeType,
-          extractOpts,
-        );
-        rawOcrText =
-          pdfText.trim().length > 0
-            ? `${pdfText.slice(0, 12_000)}\n\n[PDF escaneado: campos inferidos por visión en la página 1.]`
-            : "[PDF escaneado sin texto seleccionable: campos inferidos por visión en la página 1.]";
-      } else {
-        rawOcrText = pdfText;
-        extracted = await extractInvoiceData(pdfText, extractOpts);
-      }
-    } else {
-      const [preprocessed] = await preprocessVisionImages([
-        {
-          buffer,
-          mimeType: mimeType as "image/jpeg" | "image/png",
-        },
-      ]);
-      visionImages = [preprocessed];
-      extracted = await extractInvoiceDataFromImage(
-        preprocessed.buffer,
-        preprocessed.mimeType,
-        extractOpts,
-      );
-      rawOcrText = "[Campos inferidos por visión.]";
-    }
-
-    let amountsSupplement: AmountsSupplement | null = null;
-    let discountSupplement: DiscountSupplement | null = null;
-    if (visionImages?.length) {
-      const footerImages = pickFooterVisionImages(visionImages);
-      const wantDiscount = hasAnyDiscountSignal({ extracted, rawOcrText });
-      const [enriched, supplement, discountSupp] = await Promise.all([
-        enrichExtractionFiscalAuth(extracted, {
-          rawOcrText,
-          visionImages: footerImages,
-        }),
-        fetchAmountsSupplementCropped(visionImages),
-        wantDiscount
-          ? fetchDiscountSupplementCropped(visionImages, {
-              rawOcrText,
-              providerName: extracted.provider,
-              discountLines: extracted.discount_lines,
-            })
-          : Promise.resolve(null),
-      ]);
-      extracted = enriched;
-      amountsSupplement = supplement;
-      discountSupplement = discountSupp;
-    } else {
-      extracted = await enrichExtractionFiscalAuth(extracted, { rawOcrText });
-    }
-
-    const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
-      precomputedSupplement: amountsSupplement,
-    });
-    const { extracted: resolvedExtracted, debug: discountResolution } =
-      enrichExtractedDiscounts(finalized.extracted, {
-        rawOcrText,
-        supplement: discountSupplement,
-      });
-    logDiscountResolution("uploadSingle", discountResolution);
-
-    const resolved = await resolveOrCreateInvoiceSupplier(
-      userId,
-      resolvedExtracted.provider,
-      resolvedExtracted.cuit,
-    );
-    const aiCuit = normalizeArgentineCuitFromAiOrNull(resolvedExtracted.cuit);
-    const providerCuit = resolved?.cuit ?? aiCuit;
-    const supplierCode = resolved?.code ?? null;
-    const cuitResolution = await resolveEmpresaSucursalForInvoice(
-      userId,
-      providerCuit,
-    );
-
-    const chartAccount =
-      (await resolveChartAccountForSupplierCode(userId, supplierCode)) ??
-      (await resolveChartAccountForExtraction(userId, resolvedExtracted.chart_account_code, null));
-
-    const invoiceDate = parseAiInvoiceDate(resolvedExtracted.invoice_date);
-    const movementId = await allocateUniqueMovementId(invoiceDate);
-    const doc = resolveDocumentClassification(resolvedExtracted, rawOcrText);
-    const documentKind = doc.documentKind;
-    const documentClass = doc.documentClass;
-    const afipCode = doc.afipCode;
-    const fiscalAuthType = doc.fiscalAuthType;
-    const fiscalAuthCode = doc.fiscalAuthCode;
-
-    let empresaOut = cuitResolution.autoEmpresa;
-    if (documentKind === "PRESUPUESTO") {
-      const presupuestoDefaults = await loadPresupuestoDefaults(userId);
-      if (presupuestoDefaults.letra) {
-        resolvedExtracted.invoice_type = presupuestoDefaults.letra;
-      }
-      if (presupuestoDefaults.empresa) empresaOut = presupuestoDefaults.empresa;
-    }
-
-    const aiPayloadOut: Record<string, unknown> = {
-      ...(resolvedExtracted as Record<string, unknown>),
-    };
-    if (discountResolution) {
-      aiPayloadOut.discount_resolution = discountResolution;
-    }
-    aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
-    if (finalized.amountsDiscrepancy != null) {
-      aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
-    }
-    if (finalized.amountsAlgebraicallyDerived) {
-      aiPayloadOut.amounts_algebraically_derived = true;
-    }
-    if (finalized.correctedField) {
-      aiPayloadOut.amounts_corrected_field = finalized.correctedField;
-    }
-    if (supplierCode) {
-      aiPayloadOut.supplier_code = supplierCode;
-    }
-    if (resolved?.cuit) {
-      aiPayloadOut.cuit = providerCuit;
-    }
-    aiPayloadOut.document_class = documentClass;
-    aiPayloadOut.afip_comprobante_code = afipCode;
-    aiPayloadOut.fiscal_auth_type = fiscalAuthType;
-    aiPayloadOut.fiscal_auth_code = fiscalAuthCode;
-    if (chartAccount) {
-      aiPayloadOut.chart_account_code = chartAccount.code;
-      aiPayloadOut.chart_account_name = chartAccount.name;
-    }
-
-    await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        rawOcrText,
-        providerName: resolvedExtracted.provider,
-        providerCuit,
-        supplierCode,
-        empresa: empresaOut,
-        sucursal: cuitResolution.autoSucursal,
-        movementId,
-        documentKind,
-        documentClass,
-        afipCode,
-        fiscalAuthType,
-        fiscalAuthCode,
-        invoiceNumber: normalizeNumeroComprobanteFromAiOrNull(
-          resolvedExtracted.invoice_number,
-        ),
-        invoiceType: resolvedExtracted.invoice_type,
-        invoiceDate,
-        exchangeRate: exchangeRateFromExtraction(resolvedExtracted.exchange_rate),
-        netAmount:
-          finalized.netAmount != null
-            ? new Prisma.Decimal(finalized.netAmount)
-            : null,
-        vatAmount:
-          finalized.vatAmount != null
-            ? new Prisma.Decimal(finalized.vatAmount)
-            : null,
-        perceptionsAmount:
-          finalized.perceptionsAmount != null
-            ? new Prisma.Decimal(finalized.perceptionsAmount)
-            : null,
-        totalAmount:
-          finalized.totalAmount != null
-            ? new Prisma.Decimal(finalized.totalAmount)
-            : null,
-        chartAccountId: chartAccount?.id ?? null,
-        aiConfidence: resolvedExtracted.confidence,
-        aiPayload: aiPayloadOut as object,
-        status: "READY",
-      },
-    });
-  } catch (e) {
-    const message = formatOpenAIExtractionError(e);
-    await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        status: "ERROR",
-        aiPayload: { error: message } as object,
-      },
-    });
-    revalidatePath("/history");
-    revalidatePath(`/history/${invoice.id}`);
-    redirect(`/history/${invoice.id}?error=1`);
-  }
-
-  revalidatePath("/history");
-  revalidatePath("/proveedores");
-  revalidatePath(`/history/${invoice.id}`);
-  redirect(`/history/${invoice.id}`);
-}
-
 export async function uploadInvoiceBatch(
   _prev: UploadBatchState,
   formData: FormData,
@@ -940,7 +679,13 @@ export async function uploadInvoiceBatch(
     mimeTypes.push(mimeType);
   }
 
-  const batchId = randomUUID();
+  // El cliente parte lotes grandes en varios requests (límite 4,5 MB de Vercel) y manda
+  // el mismo batchId en todos; si no viene o no es un UUID, se genera uno nuevo.
+  const clientBatchId = formData.get("batchId");
+  const batchId =
+    typeof clientBatchId === "string" && UUID_RE.test(clientBatchId)
+      ? clientBatchId
+      : randomUUID();
   const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
     loadSupplierMaestroCuitHintsBlock(userId),
     loadChartAccountHintsBlock(userId),
@@ -1684,8 +1429,14 @@ export async function reprocessInvoice(
   const convertedLock = conversionLockError(existing.conversionBackup);
   if (convertedLock) return convertedLock;
 
-  const previousStatus = existing.status;
-  const previousAiPayload = existing.aiPayload;
+  // Si quedó trabada en PROCESSING por un timeout previo, la libera (pasa a ERROR) antes del claim.
+  await expireStaleProcessingInvoices(userId);
+  const current = await prisma.invoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { status: true, aiPayload: true },
+  });
+  const previousStatus = current?.status ?? existing.status;
+  const previousAiPayload = current ? current.aiPayload : existing.aiPayload;
 
   const claimed = await prisma.invoice.updateMany({
     where: {
@@ -1693,7 +1444,7 @@ export async function reprocessInvoice(
       userId,
       status: { not: "PROCESSING" },
     },
-    data: { status: "PROCESSING" },
+    data: { status: "PROCESSING", processingStartedAt: new Date() },
   });
   if (claimed.count === 0) {
     return { ok: false, error: "La factura sigue procesándose." };

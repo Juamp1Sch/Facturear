@@ -210,7 +210,7 @@ Grouped by service. Template: [`.env.example`](.env.example).
 | `AUTH_SECRET` | **Yes (prod)** | Vercel / Auth | JWT signing (`NEXTAUTH_SECRET` / `BETTER_AUTH_SECRET` also accepted) |
 | `AUTH_TRUST_HOST` | Local dev | Auth | `true` locally; Vercel uses `trustHost: true` in code |
 | `OPENAI_API_KEY` | **Yes** | OpenAI | Invoice extraction |
-| `OPENAI_MODEL` | No | OpenAI | Default `gpt-4o-mini` |
+| `OPENAI_MODEL` | No | OpenAI | Default `gpt-4o`. Con `gpt-6-luna` / `gpt-5.x` se usa `OPENAI_REASONING_EFFORT` (low/medium/high) en lugar de `temperature` |
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | **Yes for registration** | SMTP | Activation + password reset emails |
 | `SMTP_PORT`, `SMTP_SECURE` | No | SMTP | Default port 587 |
 | `SMTP_FROM` | No | SMTP | Default `AgileScan <noreply@agilescan.com.ar>` |
@@ -578,7 +578,7 @@ Agrupadas por servicio. Plantilla: [`.env.example`](.env.example).
 | `AUTH_SECRET` | **Sí (prod)** | Vercel / Auth | Firma JWT (también acepta `NEXTAUTH_SECRET` / `BETTER_AUTH_SECRET`) |
 | `AUTH_TRUST_HOST` | Dev local | Auth | `true` en local; en Vercel el código usa `trustHost: true` |
 | `OPENAI_API_KEY` | **Sí** | OpenAI | Extracción de facturas |
-| `OPENAI_MODEL` | No | OpenAI | Default `gpt-4o-mini` |
+| `OPENAI_MODEL` | No | OpenAI | Default `gpt-4o`. Con `gpt-6-luna` / `gpt-5.x` se usa `OPENAI_REASONING_EFFORT` (low/medium/high) en lugar de `temperature` |
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | **Sí para registro** | SMTP | Emails de activación y reset |
 | `SMTP_PORT`, `SMTP_SECURE` | No | SMTP | Puerto default 587 |
 | `SMTP_FROM` | No | SMTP | Default `AgileScan <noreply@agilescan.com.ar>` |

@@ -79,7 +79,9 @@ model Invoice {
   exchangeRate        Decimal?           @map("exchange_rate") @db.Decimal(14, 4)
   conversionBackup    Json?              @map("conversion_backup")
   status              InvoiceStatus      @default(PROCESSING)
-  aiConfidence        Float?             @map("ai_confidence")
+  /// Cuándo pasó a PROCESSING; permite liberar facturas trabadas si la función se cortó por timeout.
+  processingStartedAt DateTime?          @map("processing_started_at")
+  aiConfidence       Float?             @map("ai_confidence")
   aiPayload           Json?              @map("ai_payload")
   destinationUploadedAt   DateTime? @map("destination_uploaded_at")
   destinationUploadStatus Int?      @map("destination_upload_status")
@@ -89,6 +91,8 @@ model Invoice {
   files               InvoiceFile[]
 
   @@index([batchId])
+  /// Historial y liberación de facturas trabadas (expireStaleProcessingInvoices) filtran por usuario + estado.
+  @@index([userId, status])
 }
 
 model InvoiceFile {
