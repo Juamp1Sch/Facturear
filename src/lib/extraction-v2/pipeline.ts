@@ -15,9 +15,11 @@ import {
   type MaestroSupplier,
 } from "@/lib/extraction-v2/maestro-cuit";
 import { otherTaxesOf } from "@/lib/extraction-v2/amounts-as-read";
+import { crossCheckWithOcr } from "@/lib/extraction-v2/ocr-crosscheck";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
 import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
 import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
+import { detectDocumentText } from "@/lib/extraction-v2/textract";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -27,14 +29,16 @@ import type { InvoiceExtractionV2, InvoiceExtractionV2Like } from "@/lib/extract
  * Pipeline de extracción v2, pensado para GPT-6 Luna (medido contra un set de referencia de
  * facturas reales: 89% de campos correctos vs 82,5% del pipeline de gpt-4o, ~2,5x más rápido):
  *
- * 1. QR / código de barras de ARCA decodificados en código → datos fiscales exactos.
- * 2. UNA llamada al modelo con el texto del PDF, cada página en resolución original y
- *    ampliaciones de cabecera y pie (letra chica: CUIT, número, totales, CAE).
+ * 1. QR / código de barras de ARCA decodificados en código → datos fiscales exactos. En
+ *    paralelo, OCR de Textract de fotos y PDF escaneados (pista + segunda lectura).
+ * 2. UNA llamada al modelo con el texto del PDF (o del OCR), cada página en resolución original
+ *    y ampliaciones de cabecera y pie (letra chica: CUIT, número, totales, CAE).
  * 3. Validación en código (dígito verificador, suma de importes, CAE, fecha) y una 2da
  *    pasada SOLO si algo no valida, indicándole al modelo qué releer.
  * 4. Los datos del QR pisan la lectura del modelo; sin QR, el CUIT se contrasta con el
  *    maestro de proveedores.
- * 5. Lo que no se pudo verificar queda marcado para revisar (aiPayload.review).
+ * 5. Lo que no se pudo verificar, o donde el OCR leyó otra cosa (CAE, número, fecha), queda
+ *    marcado para revisar (aiPayload.review).
  */
 
 export type ExtractionPart = { buffer: Buffer; mimeType: string };
@@ -165,11 +169,32 @@ export function compareQrWithPrintedReading(
   return issues;
 }
 
-/** Dependencias externas, inyectables en tests (modelo y lector de códigos). */
+/** Dependencias externas, inyectables en tests (modelo, lector de códigos y OCR). */
 export type ExtractionV2Deps = {
   extract: typeof extractInvoiceDataV2;
   decode: typeof decodeArcaFiscalData;
+  ocr: typeof detectDocumentText;
 };
+
+/**
+ * Un remito no es un comprobante contable: los números que tenga son cantidades o precios de
+ * referencia, no importes a imputar (medido: el modelo tomaba una cantidad "1" como total).
+ */
+function withoutRemitoAmounts(e: InvoiceExtractionV2): InvoiceExtractionV2 {
+  if (e.document_kind !== "REMITO") return e;
+  return {
+    ...e,
+    net_amount: null,
+    vat_amount: null,
+    vat_lines: null,
+    perceptions_amount: null,
+    perception_lines: null,
+    discount_amount: null,
+    discount_lines: null,
+    other_taxes_amount: null,
+    total_amount: null,
+  };
+}
 
 /** El número impreso (PV + número) coincide exactamente con el del QR. */
 export function qrNumberMatchesPrint(read: InvoiceExtractionV2Like, qr: ArcaFiscalData): boolean {
@@ -187,7 +212,10 @@ export async function extractInvoiceV2(
 ): Promise<ExtractionV2Result> {
   const extract = deps.extract ?? extractInvoiceDataV2;
   const decode = deps.decode ?? decodeArcaFiscalData;
+  const ocr = deps.ocr ?? detectDocumentText;
   const pages: Buffer[] = [];
+  /** Fotos y páginas de PDF escaneados (sin texto embebido): las que pasan por el OCR. */
+  const ocrPages: Buffer[] = [];
   const decodePages: DecodePage[] = [];
   const visionImages: VisionImage[] = [];
   const texts: string[] = [];
@@ -195,16 +223,19 @@ export async function extractInvoiceV2(
     const part = parts[i]!;
     if (part.mimeType === "application/pdf") {
       const text = await runOcr(part.buffer, part.mimeType);
-      if (text.replace(/\s+/g, " ").trim().length >= MIN_PDF_TEXT_CHARS) {
+      const hasText = text.replace(/\s+/g, " ").trim().length >= MIN_PDF_TEXT_CHARS;
+      if (hasText) {
         texts.push(`--- Parte ${i + 1} ---\n${text.slice(0, 30_000)}`);
       }
       for (const png of await rasterizePdfPagesPng(part.buffer, { scale: PDF_RENDER_SCALE })) {
         pages.push(png);
+        if (!hasText) ocrPages.push(png);
         decodePages.push({ buffer: png, enlargeIfSmall: false });
         visionImages.push({ buffer: png, mimeType: "image/png" });
       }
     } else {
       pages.push(part.buffer);
+      ocrPages.push(part.buffer);
       decodePages.push({ buffer: part.buffer, enlargeIfSmall: true });
       visionImages.push({ buffer: part.buffer, mimeType: part.mimeType === "image/png" ? "image/png" : "image/jpeg" });
     }
@@ -217,8 +248,9 @@ export async function extractInvoiceV2(
     );
   }
 
-  const [decoded, preparedPages, headerCrop, footerCrop] = await Promise.all([
+  const [decoded, ocrTexts, preparedPages, headerCrop, footerCrop] = await Promise.all([
     decode(decodePages),
+    ocrPages.length ? ocr(ocrPages) : Promise.resolve(null),
     Promise.all(pages.map((p) => prepareImage(p, PAGE_MIN_SIDE_PX))),
     cropBand(pages[0]!, HEADER_CROP),
     cropBand(pages[pages.length - 1]!, FOOTER_CROP),
@@ -228,6 +260,20 @@ export async function extractInvoiceV2(
   const rawText = texts.length ? texts.join("\n\n") : null;
   if (rawText) {
     content.push({ type: "text", text: `Texto embebido del PDF (confiable para dígitos; usá las imágenes para ubicar cada dato):\n${rawText}` });
+  }
+  const ocrText = ocrTexts?.some((t) => t.trim())
+    ? ocrTexts.map((t, i) => `--- Imagen ${i + 1} ---\n${t}`).join("\n\n")
+    : null;
+  if (ocrText) {
+    console.info(`[extraction-v2] OCR Textract: ${ocrTexts!.length} imagen(es)`);
+    // Pista, no verdad: el OCR también se equivoca. Medido: con esta pista Luna deja de correr
+    // dígitos del CAE/número en fotos; la imagen sigue mandando.
+    content.push({
+      type: "text",
+      text:
+        "Texto leído por un OCR de las imágenes (PUEDE TENER ERRORES en dígitos). Usalo como ayuda para leer números chicos (CAE, número de comprobante, fecha, CUIT, importes), pero la imagen manda: si no coincide con lo que se ve, usá lo que se ve.\n" +
+        ocrText.slice(0, 30_000),
+    });
   }
   preparedPages.forEach((jpeg, i) => {
     content.push({ type: "text", text: `Página ${i + 1} completa:` });
@@ -292,7 +338,7 @@ export async function extractInvoiceV2(
     fiscal ? applyFiscalData(first, fiscal).verifiedFields.filter((f) => f !== "total") : [],
   );
   const readIssuesOf = (e: InvoiceExtractionV2) =>
-    validateExtraction(e, null).filter((i) => !coveredByCode.has(i.field));
+    validateExtraction(withoutRemitoAmounts(e), null).filter((i) => !coveredByCode.has(i.field));
   let read = first;
   let readIssues = readIssuesOf(read);
   if (readIssues.length > 0) {
@@ -312,7 +358,7 @@ export async function extractInvoiceV2(
       readIssues = retryIssues;
     }
   }
-  let extracted = withFiscal(read);
+  let extracted = withoutRemitoAmounts(withFiscal(read));
 
   let cuitCorrection: ExtractionReview["cuitCorrection"];
   let verifiedFields: VerifiedField[] = [];
@@ -337,6 +383,8 @@ export async function extractInvoiceV2(
   if (!fiscal && !extracted.cuit && extracted.document_kind && extracted.document_kind !== "PRESUPUESTO") {
     extraIssues.push({ field: "cuit", reason: "No se encontró el CUIT del emisor en el comprobante." });
   }
+  // CAE, número y fecha contra la segunda lectura del OCR (lo que el QR trae exacto no se cruza).
+  extraIssues.push(...crossCheckWithOcr(extracted, ocrText, verifiedFields));
   if (otherTaxesOf(extracted) > 0) {
     extraIssues.push({
       field: "extraction",

@@ -10,6 +10,7 @@ import {
 } from "./arca-codes";
 import { matchCuitAgainstMaestro, supplierNameSimilarity } from "./maestro-cuit";
 import { amountsAsRead } from "./amounts-as-read";
+import { crossCheckWithOcr, ocrCandidates } from "./ocr-crosscheck";
 import { readExtractionReview } from "./review";
 import { validateExtraction } from "./validate";
 import type { InvoiceExtraction } from "../schemas";
@@ -369,3 +370,85 @@ test("pipeline: un ITF con CUIT conocido del maestro pero distinto del impreso n
   assert.equal(r.review.verifiedBy, null);
   assert.equal(r.extracted.fiscal_auth_code, base.fiscal_auth_code);
 });
+
+// ---- OCR (Textract) como pista y segunda lectura ----
+const OCR_FOOTER = "FACTURA A\n0006-00128741\nFecha: 26/01/2026\nCAE: 8604 1474 5980 43  VTO: 05/02/2026\nC.U.I.T. 30-71178446-9";
+
+test("OCR: candidatos de CAE (con espacios del OCR), número y fechas", () => {
+  const c = ocrCandidates(OCR_FOOTER);
+  assert.ok(c.auth.has("86041474598043"));
+  assert.ok(c.number.has("6-128741"));
+  assert.ok(c.date.has("2026-01-26") && c.date.has("2026-02-05"));
+  // Letras que el OCR confunde con dígitos dentro de un número.
+  assert.ok(ocrCandidates("CAE 86O4147459BO43").auth.has("86041474598043"));
+});
+
+test("OCR: coincide → sin marca; difiere → marca con la lectura del OCR; sin lectura → nada", () => {
+  assert.deepEqual(crossCheckWithOcr(baseV2, OCR_FOOTER), []);
+  const wrong = crossCheckWithOcr(
+    { ...baseV2, fiscal_auth_code: "86041474598048", invoice_number: "00006-00128747", invoice_date: "2026-01-28" },
+    OCR_FOOTER,
+  );
+  assert.deepEqual(wrong.map((i) => i.field), ["fiscal_auth", "invoice_number", "invoice_date"]);
+  assert.match(wrong[0]!.reason, /86041474598043/);
+  assert.match(wrong[1]!.reason, /00006-00128741/);
+  assert.deepEqual(crossCheckWithOcr({ ...baseV2, fiscal_auth_code: "86041474598048" }, "texto sin números"), []);
+  assert.deepEqual(crossCheckWithOcr({ ...baseV2, fiscal_auth_code: "86041474598048" }, null), []);
+});
+
+test("OCR: no cruza lo que el QR ya trae exacto", () => {
+  const issues = crossCheckWithOcr({ ...baseV2, fiscal_auth_code: "86041474598048" }, OCR_FOOTER, ["fiscal_auth"]);
+  assert.deepEqual(issues, []);
+});
+
+test("pipeline: el texto del OCR va como pista y un CAE distinto queda marcado", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const calls: ExtractArgs[] = [];
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    ocr: async (pages) => pages.map(() => OCR_FOOTER),
+    extract: async (args) => {
+      calls.push(args as ExtractArgs);
+      return { ...baseV2, fiscal_auth_code: "86041474598048" };
+    },
+  });
+  const hint = calls[0]!.content.find((c) => JSON.stringify(c).includes("OCR"));
+  assert.ok(hint && JSON.stringify(hint).includes("8604 1474 5980 43"), "la pista incluye el texto del OCR");
+  assert.match(r.review.fields.fiscal_auth ?? "", /OCR leyó otro CAE/);
+});
+
+test("pipeline: si el OCR falla, sigue sin pista ni marcas del OCR", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const calls: ExtractArgs[] = [];
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    ocr: async () => null,
+    extract: async (args) => {
+      calls.push(args as ExtractArgs);
+      return baseV2;
+    },
+  });
+  assert.equal(calls[0]!.content.some((c) => JSON.stringify(c).includes("OCR")), false);
+  assert.deepEqual(r.review.fields, {});
+});
+
+test("pipeline: un remito queda sin importes y sin marca de importes", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  let n = 0;
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    ocr: async () => null,
+    extract: async () => {
+      n++;
+      // Una cantidad "1" leída como neto y total: no cierra la suma.
+      return { ...baseV2, document_kind: "REMITO" as const, net_amount: 1, vat_amount: null, perceptions_amount: null, total_amount: 1, other_taxes_amount: 3 };
+    },
+  });
+  assert.equal(n, 1, "no reintenta por importes de un remito");
+  assert.equal(r.extracted.total_amount, null);
+  assert.equal(r.extracted.net_amount, null);
+  assert.equal(r.extracted.other_taxes_amount, null);
+  assert.equal(r.review.fields.amounts, undefined);
+  assert.equal(r.review.fields.extraction, undefined);
+});
+

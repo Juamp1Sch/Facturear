@@ -101,7 +101,7 @@ scripts/                    # Scripts de mantenimiento / dev
 - **DB:** PostgreSQL vía Prisma 5 (`DATABASE_URL`). Cliente singleton en `src/lib/db.ts`.
 - **Auth:** Auth.js / NextAuth v5 beta (Credentials + JWT, sesión 7 días).
 - **Estilos:** Tailwind CSS v4 (CSS-first en `src/app/globals.css`), shadcn/ui + Base UI.
-- **IA:** OpenAI (`gpt-6-luna` por defecto, pipeline v2 en `src/lib/extraction-v2`) para extracción de facturas; QR de ARCA con `zxing-wasm`.
+- **IA:** OpenAI (`gpt-6-luna` por defecto, pipeline v2 en `src/lib/extraction-v2`) para extracción de facturas; QR de ARCA con `zxing-wasm`; OCR de AWS Textract para fotos y PDF escaneados.
 - **Storage:** AWS S3 → Neon `stored_files` → local `.data/uploads/` (orden de prioridad).
 - **Email:** Nodemailer SMTP (aprobación de registro + reset de password).
 - **Path alias:** `@/*` → `./src/*`.
@@ -167,7 +167,7 @@ Upload → Guardar archivo → Extraer texto/visión → Parse OpenAI → Match 
 | 1. Guardar | `src/lib/storage.ts` | S3 → Neon `stored_files` → local `.data/uploads/` |
 | 2. Texto PDF | `src/lib/ocr.ts` → `src/lib/pdf-text.ts` | `pdf-parse` para texto embebido |
 | 3. Raster PDF | `src/lib/pdf-raster.ts` | `pdf-to-img` + `@napi-rs/canvas` para PDFs escaneados |
-| 4. Extracción IA | `src/lib/extraction-v2/pipeline.ts` → `src/lib/ai.ts` | Pipeline v2 (GPT-6 Luna): QR/código de barras de ARCA decodificado en código (datos exactos), 1 llamada con páginas en resolución original + ampliaciones de cabecera/pie, validación (dígito verificador, suma, CAE, fecha) y 2da pasada solo si falla; CUIT contrastado con el maestro de proveedores; lo no verificado queda en `aiPayload.review` y la UI lo marca "Revisar". `EXTRACTION_PIPELINE=legacy` vuelve al pipeline de varias pasadas de gpt-4o |
+| 4. Extracción IA | `src/lib/extraction-v2/pipeline.ts` → `src/lib/ai.ts` | Pipeline v2 (GPT-6 Luna): QR/código de barras de ARCA decodificado en código (datos exactos), OCR de Textract en fotos y PDF escaneados (pista para el modelo + CAE/número/fecha cruzados con la lectura), 1 llamada con páginas en resolución original + ampliaciones de cabecera/pie, validación (dígito verificador, suma, CAE, fecha) y 2da pasada solo si falla; CUIT contrastado con el maestro de proveedores; lo no verificado queda en `aiPayload.review` y la UI lo marca "Revisar". `EXTRACTION_PIPELINE=legacy` vuelve al pipeline de varias pasadas de gpt-4o |
 | 5. Match proveedor | `src/lib/supplier-match.ts` | Matching por CUIT + alias |
 | 6. Cuenta contable | `src/lib/chart-account-match.ts` | Resolución de cuenta |
 | 7. Subida ERP | `src/actions/integration-upload.ts` | POST JSON contable con `X-Auth-Token` |
@@ -183,6 +183,7 @@ Upload → Guardar archivo → Extraer texto/visión → Parse OpenAI → Match 
 |----------|---------|----------|
 | OpenAI | `src/lib/ai.ts` | `OPENAI_API_KEY`, `OPENAI_MODEL` |
 | AWS S3 | `src/lib/storage.ts` | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME` |
+| AWS Textract | `src/lib/extraction-v2/textract.ts` | `TEXTRACT_*` o las `AWS_*` de S3 (permiso `textract:DetectDocumentText`), `TEXTRACT_REGION` (default us-east-1), `EXTRACTION_OCR=off` |
 | SMTP | `src/lib/email.ts` | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `REGISTRATION_NOTIFY_EMAIL` |
 | ERP externo | `src/lib/integration-auth.ts` | Config por-usuario en `/api-config` |
 
