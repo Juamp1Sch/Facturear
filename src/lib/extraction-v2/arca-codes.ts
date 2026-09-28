@@ -164,6 +164,9 @@ export function applyFiscalData<T extends InvoiceExtraction>(
   // Solo dólares: la app convierte USD→ARS. Otras monedas (p. ej. EUR "060") no se soportan aún.
   if (fiscal.currency === "DOL" && fiscal.exchangeRate != null && fiscal.exchangeRate > 1) {
     out.exchange_rate = fiscal.exchangeRate;
+  } else if (fiscal.currency === "PES") {
+    // El QR prueba que está en pesos: un "tipo de cambio de referencia" impreso no aplica.
+    out.exchange_rate = null;
   }
   return { extracted: out, verifiedFields };
 }

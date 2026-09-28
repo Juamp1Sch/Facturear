@@ -272,25 +272,35 @@ export async function extractInvoiceV2(
     fiscal = null;
   }
   const withFiscal = (e: InvoiceExtractionV2) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
-  let extracted = withFiscal(first);
-  let issues = validateExtraction(extracted, fiscal);
 
-  if (issues.length > 0) {
-    const hints = issues.map((i) => `- ${i.retryHint ?? i.reason}`).join("\n");
+  // El reintento también es CIEGO: ve solo su propia lectura y los problemas de ESA lectura
+  // (sin datos del QR). Si viera el total del QR podría inventar un desglose que cierre contra
+  // él. Tampoco se reintenta por campos que el QR ya trae exactos.
+  const coveredByCode = new Set<string>(
+    fiscal ? applyFiscalData(first, fiscal).verifiedFields.filter((f) => f !== "total") : [],
+  );
+  const readIssuesOf = (e: InvoiceExtractionV2) =>
+    validateExtraction(e, null).filter((i) => !coveredByCode.has(i.field));
+  let read = first;
+  let readIssues = readIssuesOf(read);
+  if (readIssues.length > 0) {
+    const hints = readIssues.map((i) => `- ${i.retryHint ?? i.reason}`).join("\n");
     const retry = await extract({
       systemPrompt: prompt,
       content,
       reasoningEffort: "medium",
       pass: "v2_retry",
-      followUp: `Tu extracción anterior:\n${JSON.stringify(extracted)}\n\nNo pasó estas validaciones:\n${hints}\n\nRevisá esas zonas del documento con máximo cuidado y devolvé la extracción completa corregida. Si el valor realmente es así en el documento, mantenelo.`,
+      followUp: `Tu extracción anterior:\n${JSON.stringify(read)}\n\nNo pasó estas validaciones:\n${hints}\n\nRevisá esas zonas del documento con máximo cuidado y devolvé la extracción completa corregida. Si el valor realmente es así en el documento, mantenelo.`,
     });
-    const retryFixed = withFiscal(retry);
-    const retryIssues = validateExtraction(retryFixed, fiscal);
-    if (retryIssues.length <= issues.length) {
-      extracted = retryFixed;
-      issues = retryIssues;
+    const retryIssues = readIssuesOf(retry);
+    // Se acepta solo si no aparecen problemas en campos que antes estaban bien.
+    const before = new Set<string>(readIssues.map((i) => i.field));
+    if (retryIssues.length <= readIssues.length && retryIssues.every((i) => before.has(i.field))) {
+      read = retry;
+      readIssues = retryIssues;
     }
   }
+  let extracted = withFiscal(read);
 
   let cuitCorrection: ExtractionReview["cuitCorrection"];
   let verifiedFields: VerifiedField[] = [];

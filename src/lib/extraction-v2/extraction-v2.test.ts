@@ -314,3 +314,31 @@ test("QR: punto de venta/número deben ser enteros positivos y el CAE de 14 díg
   assert.equal(ok?.number, undefined);
   assert.equal(parseArcaQrText(qrUrl({ cuit: 30000000007, codAut: 123 })), null);
 });
+
+test("pipeline: el reintento es ciego y no se hace por campos que el QR ya cubre", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const calls: ExtractArgs[] = [];
+  const qr = { source: "QR" as const, cuit: base.cuit!, total: base.total_amount!, pointOfSale: 6, number: 128741, comprobanteCode: 1, currency: "PES", authType: "CAE" as const, authCode: "86041474598043" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => qr,
+    extract: async (args) => {
+      calls.push(args as ExtractArgs);
+      // CUIT con un dígito mal (lo cubre el QR) y tipo de cambio de referencia en un comprobante en pesos.
+      return { ...baseV2, cuit: "30-71178446-8", exchange_rate: 1400 };
+    },
+  });
+  assert.equal(calls.length, 1, "no reintenta por el CUIT: lo trae el QR");
+  assert.equal(r.extracted.cuit, base.cuit);
+  assert.equal(r.extracted.exchange_rate, null, "QR en pesos descarta el tipo de cambio");
+});
+
+test("pipeline: un reintento que rompe otro campo no se acepta", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  let n = 0;
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    extract: async () => (++n === 1 ? { ...baseV2, cuit: "30-71178446-8" } : { ...baseV2, invoice_date: "2026-02-30" }),
+  });
+  assert.equal(n, 2);
+  assert.equal(r.extracted.invoice_date, base.invoice_date, "se queda con la primera lectura");
+});
