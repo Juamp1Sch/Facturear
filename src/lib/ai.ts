@@ -452,9 +452,16 @@ export async function supplementDiscountFromImages(
 }
 
 /**
+ * Tope por llamada: el default del SDK es 10 min, y una llamada colgada (medido: pasa) dejaba la
+ * factura esperando ~10 min antes del reintento. Una lectura normal tarda 5-40 s; el SDK
+ * reintenta solo al vencer el tope.
+ */
+const V2_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
  * Extracción v2 (src/lib/extraction-v2): una llamada con el prompt y el contenido armados por
- * el pipeline (texto del PDF, páginas, ampliaciones y datos del QR de ARCA). `followUp` se usa
- * en la 2da pasada para indicar qué validaciones fallaron.
+ * el pipeline (texto del PDF o del OCR, páginas y ampliaciones). `followUp` se usa en la 2da
+ * pasada para indicar qué validaciones fallaron.
  */
 export async function extractInvoiceDataV2(params: {
   systemPrompt: string;
@@ -471,11 +478,14 @@ export async function extractInvoiceDataV2(params: {
   if (params.followUp) messages.push({ role: "user", content: params.followUp });
 
   const completion = await withOpenAIRetry(() =>
-    openai.beta.chat.completions.parse({
-      ...modelParams(params.reasoningEffort),
-      messages,
-      response_format: zodResponseFormat(invoiceExtractionSchemaV2, "invoice_extraction"),
-    }),
+    openai.beta.chat.completions.parse(
+      {
+        ...modelParams(params.reasoningEffort),
+        messages,
+        response_format: zodResponseFormat(invoiceExtractionSchemaV2, "invoice_extraction"),
+      },
+      { timeout: V2_REQUEST_TIMEOUT_MS },
+    ),
   );
   logUsage(params.pass, completion);
 

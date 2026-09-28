@@ -2,7 +2,7 @@ import { levenshtein } from "@/lib/extraction-v2/maestro-cuit";
 import type { InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
 import type { VerifiedField } from "@/lib/extraction-v2/review";
 import type { ReviewIssue } from "@/lib/extraction-v2/validate";
-import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
+import { formatNumeroComprobante, parseNumeroComprobanteParts } from "@/lib/numero-comprobante";
 
 /**
  * Cruce de la lectura del modelo con el texto de un OCR independiente (Textract) en los campos
@@ -25,27 +25,37 @@ function fixDigitLookalikes(text: string): string {
   });
 }
 
-export function ocrCandidates(text: string): OcrCandidates {
+const AUTH_LABEL = /\bC\.?\s?A\.?\s?E\.?\s?A?\b|\bC\.?\s?A\.?\s?I\b/i;
+
+export function ocrCandidates(text: string, now: Date = new Date()): OcrCandidates {
   const t = fixDigitLookalikes(text);
   const auth = new Set<string>();
   const number = new Set<string>();
   const date = new Set<string>();
-  // CAE/CAEA/CAI: 14 dígitos, a veces con espacios o guiones que mete el OCR.
-  for (const m of t.matchAll(/\d[\d \-.]{12,20}\d/g)) {
-    const digits = m[0].replace(/\D/g, "");
-    if (digits.length === 14) auth.add(digits);
-  }
+  // CAE/CAEA/CAI: 14 dígitos seguidos en cualquier lugar. Partidos por espacios o guiones (lo
+  // hace el OCR) solo en el renglón de la etiqueta CAE/CAI o el siguiente: si no, se podrían
+  // unir números vecinos (CUIT, teléfono) en un "CAE" que no existe.
   for (const m of t.matchAll(/(?<!\d)\d{14}(?!\d)/g)) auth.add(m[0]);
+  const lines = t.split("\n");
+  lines.forEach((line, i) => {
+    if (!AUTH_LABEL.test(line) && !AUTH_LABEL.test(lines[i - 1] ?? "")) return;
+    for (const m of line.matchAll(/\d[\d \-.]{12,20}\d/g)) {
+      const digits = m[0].replace(/\D/g, "");
+      if (digits.length === 14) auth.add(digits);
+    }
+  });
   // Número de comprobante con punto de venta: PV (4-5 dígitos) - número (8 dígitos).
   for (const m of t.matchAll(/(?<!\d)(\d{4,5})\s*[-–—]\s*(\d{8})(?!\d)/g)) {
     number.add(`${Number(m[1])}-${Number(m[2])}`);
   }
-  // Fechas dd/mm/aaaa (o aa), con / - o . como separador.
+  // Fechas dd/mm/aaaa (o aa), con / - o . como separador. Un año de 2 dígitos mayor al actual
+  // (p. ej. "inicio de actividades 01/03/95") no es de este siglo: se descarta.
+  const maxYear = now.getUTCFullYear() + 1;
   for (const m of t.matchAll(/(?<!\d)(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{4}|\d{2})(?!\d)/g)) {
     const day = Number(m[1]);
     const month = Number(m[2]);
     const year = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2099) {
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= maxYear) {
       date.add(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
     }
   }
@@ -57,8 +67,8 @@ function closest(value: string, options: Set<string>): string {
 }
 
 const formatNumber = (key: string) => {
-  const [pv, n] = key.split("-");
-  return `${pv!.padStart(5, "0")}-${n!.padStart(8, "0")}`;
+  const [pv, n] = key.split("-").map(Number);
+  return formatNumeroComprobante(pv!, n!);
 };
 const formatDate = (iso: string) => iso.split("-").reverse().join("/");
 
@@ -80,9 +90,8 @@ export function crossCheckWithOcr(
     });
   }
 
-  const printed = normalizeNumeroComprobanteFromAiOrNull(e.invoice_number);
-  const m = printed ? /^(\d+)-(\d+)$/.exec(printed) : null;
-  const numberKey = m ? `${Number(m[1])}-${Number(m[2])}` : null;
+  const printed = parseNumeroComprobanteParts(e.invoice_number);
+  const numberKey = printed ? `${printed.puntoDeVenta}-${printed.numero}` : null;
   if (!verifiedFields.includes("invoice_number") && numberKey && c.number.size > 0 && !c.number.has(numberKey)) {
     issues.push({
       field: "invoice_number",

@@ -432,6 +432,12 @@ test("pipeline: si el OCR falla, sigue sin pista ni marcas del OCR", async () =>
   assert.deepEqual(r.review.fields, {});
 });
 
+// Remito fiscal (letra R, CAI), como el de Limansky.
+const remitoV2 = {
+  ...baseV2, document_kind: "REMITO" as const, invoice_type: "R", afip_comprobante_code: null,
+  fiscal_auth_type: "CAI" as const, fiscal_auth_code: "52076217180316",
+};
+
 test("pipeline: un remito queda sin importes y sin marca de importes", async () => {
   const { extractInvoiceV2 } = await import("./pipeline");
   let n = 0;
@@ -441,7 +447,7 @@ test("pipeline: un remito queda sin importes y sin marca de importes", async () 
     extract: async () => {
       n++;
       // Una cantidad "1" leída como neto y total: no cierra la suma.
-      return { ...baseV2, document_kind: "REMITO" as const, net_amount: 1, vat_amount: null, perceptions_amount: null, total_amount: 1, other_taxes_amount: 3 };
+      return { ...remitoV2, net_amount: 1, vat_amount: null, perceptions_amount: null, total_amount: 1, other_taxes_amount: 3 };
     },
   });
   assert.equal(n, 1, "no reintenta por importes de un remito");
@@ -450,5 +456,26 @@ test("pipeline: un remito queda sin importes y sin marca de importes", async () 
   assert.equal(r.extracted.other_taxes_amount, null);
   assert.equal(r.review.fields.amounts, undefined);
   assert.equal(r.review.fields.extraction, undefined);
+});
+
+test("pipeline: si el modelo dice remito pero hay CAE de factura, conserva importes y marca", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    ocr: async () => null,
+    // Factura A con CAE (la clasificación final es FACTURA) y total que no cierra.
+    extract: async () => ({ ...baseV2, document_kind: "REMITO" as const, total_amount: 1600 }),
+  });
+  assert.equal(r.extracted.total_amount, 1600);
+  assert.ok(r.review.fields.amounts, "la suma que no cierra sigue marcada");
+});
+
+test("OCR: dígitos partidos solo forman un CAE junto a la etiqueta; años de 2 dígitos futuros se descartan", () => {
+  // Teléfono + CUIT sueltos en otro renglón: no es un CAE.
+  assert.equal(ocrCandidates("Tel 4444 5555\n3071 1784 4690 12").auth.size, 0);
+  assert.ok(ocrCandidates("C.A.E. N°:\n8604 1474 5980 43").auth.has("86041474598043"));
+  const now = new Date("2026-06-01T00:00:00Z");
+  assert.deepEqual([...ocrCandidates("Inicio de actividades: 01/03/95", now).date], []);
+  assert.deepEqual([...ocrCandidates("Fecha 05/06/26", now).date], ["2026-06-05"]);
 });
 

@@ -15,6 +15,17 @@ import sharp from "sharp";
  */
 
 const TIMEOUT_MS = 20_000;
+/** Páginas en paralelo por documento (la API sincrónica tiene un límite bajo de TPS). */
+const PAGE_CONCURRENCY = 2;
+/** Errores que no se arreglan reintentando (permiso o credenciales): se deja de llamar. */
+const FATAL_ERRORS = new Set([
+  "AccessDeniedException",
+  "UnrecognizedClientException",
+  "InvalidSignatureException",
+  "SubscriptionRequiredException",
+]);
+/** Por instancia del servidor: después de un error de permiso no se vuelve a llamar. */
+let disabledBy: string | null = null;
 /** Límites de la API sincrónica: 10 MB y 10.000 px por lado. */
 const MAX_BYTES = 9_500_000;
 const MAX_SIDE_PX = 8000;
@@ -55,28 +66,38 @@ async function toTextractJpeg(buffer: Buffer): Promise<Buffer> {
 }
 
 /**
- * Texto (una línea por renglón) de cada página, en el mismo orden; `null` si Textract no está
- * configurado o falla alguna página.
+ * Texto (una línea por renglón) de cada página, en el mismo orden (vacío si esa página falló);
+ * `null` si Textract no está configurado o no se pudo leer ninguna página.
  */
 export async function detectDocumentText(pages: Buffer[]): Promise<string[] | null> {
   const config = textractConfig();
-  if (!config || pages.length === 0) return null;
-  try {
-    const textract = getClient(config);
-    return await Promise.all(
-      pages.map(async (page) => {
-        const result = await textract.send(
-          new DetectDocumentTextCommand({ Document: { Bytes: await toTextractJpeg(page) } }),
-          { abortSignal: AbortSignal.timeout(TIMEOUT_MS) },
-        );
-        return (result.Blocks ?? [])
-          .filter((b) => b.BlockType === "LINE" && b.Text)
-          .map((b) => b.Text)
-          .join("\n");
-      }),
+  if (!config || pages.length === 0 || disabledBy) return null;
+  const textract = getClient(config);
+  const readPage = async (page: Buffer) => {
+    const result = await textract.send(
+      new DetectDocumentTextCommand({ Document: { Bytes: await toTextractJpeg(page) } }),
+      { abortSignal: AbortSignal.timeout(TIMEOUT_MS) },
     );
-  } catch (e) {
-    console.warn(`[extraction-v2] Textract no disponible, sigo sin OCR: ${e instanceof Error ? e.name : String(e)}`);
-    return null;
+    return (result.Blocks ?? [])
+      .filter((b) => b.BlockType === "LINE" && b.Text)
+      .map((b) => b.Text)
+      .join("\n");
+  };
+  const texts: string[] = new Array(pages.length).fill("");
+  const errors: string[] = [];
+  for (let i = 0; i < pages.length; i += PAGE_CONCURRENCY) {
+    const settled = await Promise.allSettled(pages.slice(i, i + PAGE_CONCURRENCY).map(readPage));
+    settled.forEach((r, j) => {
+      if (r.status === "fulfilled") texts[i + j] = r.value;
+      else errors.push(r.reason instanceof Error ? r.reason.name : String(r.reason));
+    });
+    const fatal = errors.find((name) => FATAL_ERRORS.has(name));
+    if (fatal) {
+      disabledBy = fatal;
+      console.warn(`[extraction-v2] Textract desactivado en esta instancia (${fatal}): revisá el permiso textract:DetectDocumentText.`);
+      return null;
+    }
   }
+  if (errors.length) console.warn(`[extraction-v2] Textract falló en ${errors.length} página(s): ${[...new Set(errors)].join(", ")}`);
+  return texts.some((t) => t.trim()) ? texts : null;
 }

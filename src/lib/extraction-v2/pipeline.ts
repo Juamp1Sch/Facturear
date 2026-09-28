@@ -17,7 +17,11 @@ import {
 import { otherTaxesOf } from "@/lib/extraction-v2/amounts-as-read";
 import { crossCheckWithOcr } from "@/lib/extraction-v2/ocr-crosscheck";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
-import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
+import { resolveDocumentClassification } from "@/lib/document-class";
+import {
+  formatNumeroComprobante,
+  parseNumeroComprobanteParts,
+} from "@/lib/numero-comprobante";
 import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
 import { detectDocumentText } from "@/lib/extraction-v2/textract";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
@@ -142,15 +146,14 @@ export function compareQrWithPrintedReading(
     });
   }
   // Mismo emisor pero otro comprobante: el número impreso difiere del QR más que un error de OCR.
-  const printed = normalizeNumeroComprobanteFromAiOrNull(read.invoice_number);
-  const m = printed ? /^(\d+)-(\d+)$/.exec(printed) : null;
-  if (m && qr.pointOfSale != null && qr.number != null) {
-    const printedDigits = `${Number(m[1])}-${Number(m[2])}`;
+  const printed = parseNumeroComprobanteParts(read.invoice_number);
+  if (printed && qr.pointOfSale != null && qr.number != null) {
+    const printedDigits = `${printed.puntoDeVenta}-${printed.numero}`;
     const qrDigits = `${qr.pointOfSale}-${qr.number}`;
     if (levenshtein(printedDigits, qrDigits) > NUMBER_MAX_READ_DISTANCE) {
       issues.push({
         field: "invoice_number",
-        reason: `El número del QR (${String(qr.pointOfSale).padStart(5, "0")}-${String(qr.number).padStart(8, "0")}) no coincide con el impreso (${printed}).`,
+        reason: `El número del QR (${formatNumeroComprobante(qr.pointOfSale, qr.number)}) no coincide con el impreso (${formatNumeroComprobante(printed.puntoDeVenta, printed.numero)}).`,
       });
     }
   }
@@ -179,9 +182,11 @@ export type ExtractionV2Deps = {
 /**
  * Un remito no es un comprobante contable: los números que tenga son cantidades o precios de
  * referencia, no importes a imputar (medido: el modelo tomaba una cantidad "1" como total).
+ * Se decide con la MISMA clasificación final que usa la app (`resolveDocumentClassification`):
+ * si el modelo dijo "remito" pero hay CAE de factura, sigue siendo factura y conserva importes.
  */
-function withoutRemitoAmounts(e: InvoiceExtractionV2): InvoiceExtractionV2 {
-  if (e.document_kind !== "REMITO") return e;
+function withoutRemitoAmounts(e: InvoiceExtractionV2, rawOcrText: string): InvoiceExtractionV2 {
+  if (resolveDocumentClassification(e, rawOcrText).documentKind !== "REMITO") return e;
   return {
     ...e,
     net_amount: null,
@@ -198,11 +203,8 @@ function withoutRemitoAmounts(e: InvoiceExtractionV2): InvoiceExtractionV2 {
 
 /** El número impreso (PV + número) coincide exactamente con el del QR. */
 export function qrNumberMatchesPrint(read: InvoiceExtractionV2Like, qr: ArcaFiscalData): boolean {
-  const printed = normalizeNumeroComprobanteFromAiOrNull(read.invoice_number);
-  const m = printed ? /^(\d+)-(\d+)$/.exec(printed) : null;
-  return Boolean(
-    m && qr.pointOfSale != null && qr.number != null && Number(m[1]) === qr.pointOfSale && Number(m[2]) === qr.number,
-  );
+  const printed = parseNumeroComprobanteParts(read.invoice_number);
+  return Boolean(printed && printed.puntoDeVenta === qr.pointOfSale && printed.numero === qr.number);
 }
 
 export async function extractInvoiceV2(
@@ -258,6 +260,8 @@ export async function extractInvoiceV2(
 
   const content: ContentPart[] = [];
   const rawText = texts.length ? texts.join("\n\n") : null;
+  /** Lo que se devuelve como `rawOcrText` (y con lo que la app clasifica el documento). */
+  const rawOcrText = rawText ?? `[${parts.length} parte(s): campos inferidos por visión.]`;
   if (rawText) {
     content.push({ type: "text", text: `Texto embebido del PDF (confiable para dígitos; usá las imágenes para ubicar cada dato):\n${rawText}` });
   }
@@ -338,7 +342,7 @@ export async function extractInvoiceV2(
     fiscal ? applyFiscalData(first, fiscal).verifiedFields.filter((f) => f !== "total") : [],
   );
   const readIssuesOf = (e: InvoiceExtractionV2) =>
-    validateExtraction(withoutRemitoAmounts(e), null).filter((i) => !coveredByCode.has(i.field));
+    validateExtraction(withoutRemitoAmounts(e, rawOcrText), null).filter((i) => !coveredByCode.has(i.field));
   let read = first;
   let readIssues = readIssuesOf(read);
   if (readIssues.length > 0) {
@@ -358,7 +362,7 @@ export async function extractInvoiceV2(
       readIssues = retryIssues;
     }
   }
-  let extracted = withoutRemitoAmounts(withFiscal(read));
+  let extracted = withoutRemitoAmounts(withFiscal(read), rawOcrText);
 
   let cuitCorrection: ExtractionReview["cuitCorrection"];
   let verifiedFields: VerifiedField[] = [];
@@ -405,7 +409,7 @@ export async function extractInvoiceV2(
 
   return {
     extracted,
-    rawOcrText: rawText ?? `[${parts.length} parte(s): campos inferidos por visión.]`,
+    rawOcrText,
     visionImages,
     review: { version: 2, fields, verifiedBy: fiscal?.source ?? null, verifiedFields, cuitCorrection },
   };

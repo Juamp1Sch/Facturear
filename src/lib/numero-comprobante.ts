@@ -40,3 +40,17 @@ export function normalizeNumeroComprobanteFromAiOrNull(
 
   return trimmed;
 }
+
+/** Punto de venta y número de un comprobante con PV impreso ("00006-00128741" → 6 y 128741). */
+export function parseNumeroComprobanteParts(
+  input: string | null | undefined,
+): { puntoDeVenta: number; numero: number } | null {
+  const normalized = normalizeNumeroComprobanteFromAiOrNull(input);
+  const match = normalized ? /^(\d+)-(\d+)$/.exec(normalized) : null;
+  return match ? { puntoDeVenta: Number(match[1]), numero: Number(match[2]) } : null;
+}
+
+/** "PPPPP-NNNNNNNN" con ceros a la izquierda. */
+export function formatNumeroComprobante(puntoDeVenta: number, numero: number): string {
+  return `${String(puntoDeVenta).padStart(5, "0")}-${String(numero).padStart(8, "0")}`;
+}

@@ -67,8 +67,7 @@ import {
   loadSupplierMaestroCuitHintsBlock,
   loadSupplierMaestroForCuitMatch,
 } from "@/lib/supplier-ai-hints";
-import { extractInvoiceV2 } from "@/lib/extraction-v2/pipeline";
-import type { MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
+import { extractInvoiceV2, type ExtractionV2Options } from "@/lib/extraction-v2/pipeline";
 import type { ExtractionReview } from "@/lib/extraction-v2/review";
 import { amountsAsRead } from "@/lib/extraction-v2/amounts-as-read";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
@@ -224,12 +223,7 @@ type UploadedPart = {
   publicUrl: string;
 };
 
-type ExtractOpts = {
-  maestroCuitHintsBlock: string | null;
-  chartAccountHintsBlock: string | null;
-  /** Proveedores con CUIT del usuario (corrección de CUIT en extraction-v2). */
-  maestro: MaestroSupplier[];
-};
+type ExtractOpts = ExtractionV2Options;
 
 type ExtractFromPartsResult = {
   extracted: InvoiceExtraction;
