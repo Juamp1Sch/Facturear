@@ -25,7 +25,8 @@ const MAX_FUTURE_DAYS = 2;
 
 export function validateExtraction(
   e: InvoiceExtraction,
-  fiscal: ArcaFiscalData | null,
+  /** Solo se usa el total (del QR de ARCA, exacto). */
+  fiscal: Pick<ArcaFiscalData, "total"> | null,
   now: Date = new Date(),
 ): ReviewIssue[] {
   const issues: ReviewIssue[] = [];

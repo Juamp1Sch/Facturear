@@ -150,7 +150,7 @@ public/                     # Static assets
 - **Database:** PostgreSQL via Prisma 5 (`DATABASE_URL`)
 - **Auth:** Auth.js / NextAuth v5 beta (Credentials + JWT, 7-day session)
 - **Styling:** Tailwind CSS v4 (CSS-first in `src/app/globals.css`), shadcn/ui + Base UI
-- **AI:** OpenAI (`gpt-4o-mini` default) for invoice extraction
+- **AI:** OpenAI (`gpt-6-luna` default, pipeline v2 in `src/lib/extraction-v2`) for invoice extraction; ARCA QR decoding with `zxing-wasm`
 - **Storage:** AWS S3 → Neon `stored_files` → local `.data/uploads/` (priority order)
 - **Email:** Nodemailer SMTP for registration approval + password reset
 - **Path alias:** `@/*` → `./src/*`
@@ -219,12 +219,13 @@ Upload → Store file → Extract text/vision → OpenAI parse → Match supplie
 | 1. Store | `src/lib/storage.ts` | S3 → Neon `stored_files` → local `.data/uploads/` |
 | 2. PDF text | `src/lib/ocr.ts` → `src/lib/pdf-text.ts` | `pdf-parse` for embedded text |
 | 3. PDF raster | `src/lib/pdf-raster.ts` | `pdf-to-img` + `@napi-rs/canvas` for scanned PDFs |
-| 4. AI extract | `src/lib/ai.ts` | OpenAI text + vision, Zod structured parse |
+| 4. AI extract | `src/lib/extraction-v2/pipeline.ts` → `src/lib/ai.ts` | Pipeline v2 (GPT-6 Luna): ARCA QR/barcode decoded in code (exact data, host + check digit validated), one call with pages at original resolution + header/footer zooms, validation (CUIT check digit, amounts sum, CAE, date) and a 2nd pass only if it fails; CUIT matched against the supplier master; unverified fields go to `aiPayload.review` and the UI marks them "Revisar". `EXTRACTION_PIPELINE=legacy` (+ `OPENAI_MODEL=gpt-4o`) restores the old multi-pass pipeline |
 | 5. Supplier match | `src/lib/supplier-match.ts` | CUIT + alias matching |
 | 6. Chart account | `src/lib/chart-account-match.ts` | Account resolution |
 | 7. ERP upload | `src/actions/integration-upload.ts` | POST accounting JSON with `X-Auth-Token` |
 
-**Schemas:** `src/lib/schemas.ts` — Zod schemas for AI responses
+**Schemas:** `src/lib/schemas.ts` — Zod schemas for AI responses; v2 uses `invoiceExtractionSchemaV2` (same fields, descriptions without example numbers: models copied them)
+**Evaluation:** extraction changes are measured against a local reference set of real invoices (not in the repo: real data)
 **Retry:** `src/lib/openai-retry.ts` — rate-limit retry wrapper
 **Serialization:** `src/lib/serialize-invoice.ts`, `src/lib/invoice-json.ts`
 

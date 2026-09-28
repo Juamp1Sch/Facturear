@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { buildInvoiceJson } from "@/lib/invoice-json";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
+import { readExtractionReview } from "@/lib/extraction-v2/review";
 import { formatMoney } from "@/lib/format-money";
 import { needsMissingPuntoDeVentaWarning } from "@/lib/numero-comprobante";
 import { parseDiscountFromPayload, parseTaxBreakdownFromPayload } from "@/lib/tax-breakdown";
@@ -92,6 +93,13 @@ export function InvoiceDetail({
     invoice.rawOcrText,
   );
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
+  // Misma regla que en el detalle de campos: con extracción v2 manda la marca estricta de review
+  // (y no aplica a facturas corregidas a mano ni convertidas a ARS).
+  const extractionReview =
+    invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
+  const showAmountsReview = extractionReview
+    ? Boolean(extractionReview.fields.amounts) && !invoice.isConverted
+    : amountsReview.needsReview;
   const showMissingPuntoDeVentaWarning = needsMissingPuntoDeVentaWarning(
     invoice.invoiceNumber,
   );
@@ -144,7 +152,7 @@ export function InvoiceDetail({
         <Badge variant={invoice.status === "ERROR" ? "destructive" : "secondary"}>
           {invoice.status}
         </Badge>
-        {amountsReview.needsReview ? (
+        {showAmountsReview ? (
           <Badge variant="outline" className="border-amber-500 text-amber-800 dark:text-amber-300">
             Revisar importes
             {amountsReview.discrepancy != null

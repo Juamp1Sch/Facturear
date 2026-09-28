@@ -6,8 +6,12 @@
  * Reglas (validadas contra el set de referencia, 0 correcciones indebidas):
  * - siempre exige coincidencia de nombre (el maestro tiene cientos de CUITs parecidos entre sí);
  * - nunca completa un CUIT que el modelo devolvió vacío (el maestro también puede tener errores);
- * - si hay empate entre candidatos, no corrige.
+ * - si hay empate entre candidatos, no corrige;
+ * - si el CUIT leído ya tiene dígito verificador válido, cambiar 1 dígito lo habría roto, así
+ *   que una distancia >= 2 sugiere OTRO CUIT real: solo se corrige con el nombre exacto.
  */
+import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
+
 export type MaestroSupplier = { cuit: string; name: string };
 
 export type MaestroCuitMatch =
@@ -69,6 +73,7 @@ export function matchCuitAgainstMaestro(
   if (maestro.some((m) => digits(m.cuit) === read)) return { status: "known" };
   if (!providerName?.trim()) return { status: "unknown" };
 
+  const readIsValid = normalizeArgentineCuitOrNull(formatCuit(read)) != null;
   const candidates = maestro
     .map((m) => {
       const d = digits(m.cuit);
@@ -81,7 +86,7 @@ export function matchCuitAgainstMaestro(
     })
     .filter(
       (c) =>
-        (c.distance <= 2 && c.similarity >= 0.5) ||
+        (c.distance <= 2 && c.similarity >= (readIsValid ? 0.99 : 0.5)) ||
         (c.distance <= 4 && c.similarity >= 0.99),
     )
     .sort((x, y) => x.distance - y.distance || y.similarity - x.similarity);

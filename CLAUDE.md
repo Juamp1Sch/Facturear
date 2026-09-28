@@ -101,7 +101,7 @@ scripts/                    # Scripts de mantenimiento / dev
 - **DB:** PostgreSQL vía Prisma 5 (`DATABASE_URL`). Cliente singleton en `src/lib/db.ts`.
 - **Auth:** Auth.js / NextAuth v5 beta (Credentials + JWT, sesión 7 días).
 - **Estilos:** Tailwind CSS v4 (CSS-first en `src/app/globals.css`), shadcn/ui + Base UI.
-- **IA:** OpenAI (`gpt-4o-mini` por defecto) para extracción de facturas.
+- **IA:** OpenAI (`gpt-6-luna` por defecto, pipeline v2 en `src/lib/extraction-v2`) para extracción de facturas; QR de ARCA con `zxing-wasm`.
 - **Storage:** AWS S3 → Neon `stored_files` → local `.data/uploads/` (orden de prioridad).
 - **Email:** Nodemailer SMTP (aprobación de registro + reset de password).
 - **Path alias:** `@/*` → `./src/*`.

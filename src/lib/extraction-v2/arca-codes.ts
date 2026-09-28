@@ -38,55 +38,87 @@ function formatCuit(value: string | number): string | null {
   return normalizeArgentineCuitOrNull(`${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`);
 }
 
-/** Texto del QR de ARCA: https://www.afip.gob.ar/fe/qr/?p=<base64 de un JSON>. */
+const ARCA_QR_HOSTS = /(^|\.)(afip|arca)\.gob\.ar$/i;
+
+/**
+ * Texto del QR de ARCA: https://www.afip.gob.ar/fe/qr/?p=<base64 de un JSON>.
+ * Solo se acepta si el host es de ARCA/AFIP; nunca tira (un QR ilegible no corta la búsqueda).
+ */
 export function parseArcaQrText(text: string): ArcaFiscalData | null {
-  const m = text.match(/[?&]p=([^&\s]+)/);
-  if (!m?.[1]) return null;
-  let b64 = decodeURIComponent(m[1]).replace(/-/g, "+").replace(/_/g, "/");
-  while (b64.length % 4) b64 += "=";
-  let j: Record<string, unknown>;
   try {
-    j = JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as Record<string, unknown>;
+    const url = new URL(text.trim());
+    if (!ARCA_QR_HOSTS.test(url.hostname)) return null;
+    const p = url.searchParams.get("p");
+    if (!p) return null;
+    let b64 = p.replace(/ /g, "+").replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const j: unknown = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    const o = j as Record<string, unknown>;
+    const cuit = o.cuit != null ? formatCuit(o.cuit as string | number) : null;
+    const authCode = o.codAut != null ? String(o.codAut).replace(/\D/g, "") : "";
+    if (!cuit || !authCode) return null;
+    const fecha = typeof o.fecha === "string" ? o.fecha : "";
+    const date = /^\d{2}\/\d{2}\/\d{4}$/.test(fecha)
+      ? fecha.split("/").reverse().join("-")
+      : /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+        ? fecha
+        : undefined;
+    const num = (v: unknown) => (v == null || v === "" || Number.isNaN(Number(v)) ? undefined : Number(v));
+    return {
+      source: "QR",
+      cuit,
+      date,
+      pointOfSale: num(o.ptoVta),
+      number: num(o.nroCmp),
+      comprobanteCode: num(o.tipoCmp),
+      total: num(o.importe),
+      currency: typeof o.moneda === "string" ? o.moneda : undefined,
+      exchangeRate: num(o.ctz),
+      authType: o.tipoCodAut === "A" ? "CAEA" : "CAE",
+      authCode,
+    };
   } catch {
     return null;
   }
-  const cuit = j.cuit != null ? formatCuit(j.cuit as string | number) : null;
-  const authCode = j.codAut != null ? String(j.codAut).replace(/\D/g, "") : "";
-  if (!cuit || !authCode) return null;
-  const fecha = typeof j.fecha === "string" ? j.fecha : "";
-  const date = /^\d{2}\/\d{2}\/\d{4}$/.test(fecha)
-    ? fecha.split("/").reverse().join("-")
-    : /^\d{4}-\d{2}-\d{2}$/.test(fecha)
-      ? fecha
-      : undefined;
-  const num = (v: unknown) => (v == null || v === "" || Number.isNaN(Number(v)) ? undefined : Number(v));
-  return {
-    source: "QR",
-    cuit,
-    date,
-    pointOfSale: num(j.ptoVta),
-    number: num(j.nroCmp),
-    comprobanteCode: num(j.tipoCmp),
-    total: num(j.importe),
-    currency: typeof j.moneda === "string" ? j.moneda : undefined,
-    exchangeRate: num(j.ctz),
-    authType: j.tipoCodAut === "A" ? "CAEA" : "CAE",
-    authCode,
-  };
+}
+
+/** Dígito verificador del código de barras de comprobantes (RG 1702). */
+export function arcaBarcodeCheckDigit(body: string): number {
+  let odd = 0;
+  let even = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (i % 2 === 0) odd += Number(body[i]);
+    else even += Number(body[i]);
+  }
+  return (10 - ((odd * 3 + even) % 10)) % 10;
 }
 
 /**
  * Código de barras ITF de comprobantes electrónicos:
  * CUIT (11) + tipo (2-3) + punto de venta (4-5) + CAE (14) + vencimiento AAAAMMDD (8) + DV (1).
+ * ITF detecta pocos errores de lectura: se exige el dígito verificador de ARCA (RG 1702).
  * Solo se toman CUIT y CAE: el ancho de tipo y punto de venta varía entre emisores.
  */
 export function parseArcaItfText(text: string): ArcaFiscalData | null {
   const d = text.replace(/\D/g, "");
-  if (d.length < 39 || d.length > 42) return null;
+  if (d.length < 40 || d.length > 42) return null;
+  if (arcaBarcodeCheckDigit(d.slice(0, -1)) !== Number(d.slice(-1))) return null;
   const cuit = formatCuit(d.slice(0, 11));
   if (!cuit) return null;
   const tail = d.slice(-23);
   const expiry = tail.slice(14, 22);
   if (!/^20\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(expiry)) return null;
   return { source: "ITF", cuit, authType: "CAE", authCode: tail.slice(0, 14) };
+}
+
+/** Clase de documento según el código de comprobante ARCA (dato exacto del QR). */
+export function documentKindForComprobanteCode(
+  code: number | undefined,
+): "FACTURA" | "NOTA_DEBITO" | "NOTA_CREDITO" | null {
+  if (code == null) return null;
+  if ([1, 6, 11, 19, 51, 201, 206, 211].includes(code)) return "FACTURA";
+  if ([2, 7, 12, 20, 52, 202, 207, 212].includes(code)) return "NOTA_DEBITO";
+  if ([3, 8, 13, 21, 53, 203, 208, 213].includes(code)) return "NOTA_CREDITO";
+  return null;
 }

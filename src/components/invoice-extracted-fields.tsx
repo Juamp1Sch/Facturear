@@ -404,8 +404,13 @@ export function InvoiceExtractedFields({
   // Tras una edición manual (CORRECTED) los datos ya los confirmó una persona: no se marcan.
   const extractionReview =
     invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
-  const reviewFields = extractionReview?.fields ?? {};
-  const verifiedFieldsLabel = formatVerifiedFields(extractionReview?.verifiedFields ?? []);
+  // Convertida a ARS: el total ya no es el del QR y los motivos de importes quedaron en USD.
+  const reviewFields = invoice.isConverted
+    ? { ...extractionReview?.fields, amounts: undefined }
+    : (extractionReview?.fields ?? {});
+  const verifiedFieldsLabel = formatVerifiedFields(
+    (extractionReview?.verifiedFields ?? []).filter((f) => !(invoice.isConverted && f === "total")),
+  );
   const generalReviewReasons = [reviewFields.fiscal_auth, reviewFields.extraction].filter(
     (r): r is string => Boolean(r),
   );
@@ -481,9 +486,9 @@ export function InvoiceExtractedFields({
 
         {extractionReview?.verifiedBy && verifiedFieldsLabel ? (
           <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-            {verifiedFieldsLabel} verificados con el{" "}
-            {extractionReview.verifiedBy === "QR" ? "QR" : "código de barras"} de ARCA del
-            comprobante.
+            {verifiedFieldsLabel} leídos del{" "}
+            {extractionReview.verifiedBy === "QR" ? "QR" : "código de barras"} de ARCA impreso
+            en el comprobante (sin errores de lectura).
           </div>
         ) : null}
 
@@ -952,9 +957,7 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Nº comprobante</dt>
-              <dd className="text-sm break-words">
-                {invoice.invoiceNumber ?? "—"}
-              </dd>
+              <dd className="text-sm break-words">{invoice.invoiceNumber ?? "—"}</dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Tipo (letra)</dt>

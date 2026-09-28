@@ -32,7 +32,8 @@ export async function loadSupplierMaestroCuitHintsBlock(
   return `${header}${body}`.trimEnd();
 }
 
-const MAESTRO_MATCH_MAX_ROWS = 5000;
+/** Tope de seguridad de memoria; bien por encima de cualquier maestro real. */
+const MAESTRO_MATCH_MAX_ROWS = 20_000;
 
 /** Proveedores con CUIT del usuario, para corregir el CUIT leído (extraction-v2/maestro-cuit). */
 export async function loadSupplierMaestroForCuitMatch(

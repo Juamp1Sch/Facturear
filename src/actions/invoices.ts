@@ -71,7 +71,7 @@ import { extractInvoiceV2 } from "@/lib/extraction-v2/pipeline";
 import type { MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import type { ExtractionReview } from "@/lib/extraction-v2/review";
 import { validateExtraction } from "@/lib/extraction-v2/validate";
-import { reconcileAmounts } from "@/lib/amount-reconcile";
+import { lockQrTotal } from "@/lib/extraction-v2/qr-total";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -423,29 +423,16 @@ async function applyExtractionToInvoice(
   const fiscalAuthType = doc.fiscalAuthType;
   const fiscalAuthCode = doc.fiscalAuthCode;
 
-  let finalized = await finalizeExtractedAmounts(extracted, visionImages, {
-    precomputedSupplement: amountsSupplement,
-  });
-  // El total del QR de ARCA es exacto: la reconciliación algebraica no puede pisarlo. Si el
-  // desglose no cierra con él, lo que queda marcado para revisar es el desglose.
+  // El total del QR de ARCA es exacto: la reconciliación algebraica no puede pisarlo.
   const qrTotal = options?.review?.verifiedFields?.includes("total")
     ? extracted.total_amount
     : null;
-  if (qrTotal != null && finalized.totalAmount !== qrTotal) {
-    const reconcile = reconcileAmounts({
-      net: finalized.netAmount,
-      vat: finalized.vatAmount,
-      perceptions: finalized.perceptionsAmount,
-      total: qrTotal,
-    });
-    finalized = {
-      ...finalized,
-      totalAmount: qrTotal,
-      amountsReconciled: reconcile.reconciled,
-      amountsDiscrepancy: reconcile.reconciled ? null : reconcile.discrepancy,
-      extracted: { ...finalized.extracted, total_amount: qrTotal },
-    };
-  }
+  const finalized = lockQrTotal(
+    await finalizeExtractedAmounts(extracted, visionImages, {
+      precomputedSupplement: amountsSupplement,
+    }),
+    qrTotal,
+  );
   const { extracted: resolvedExtracted, debug: discountResolution } =
     enrichExtractedDiscounts(finalized.extracted, {
       rawOcrText,
@@ -479,7 +466,7 @@ async function applyExtractionToInvoice(
         perceptions_amount: finalized.perceptionsAmount,
         total_amount: finalized.totalAmount,
       },
-      null,
+      qrTotal != null ? { total: qrTotal } : null,
     ).find((issue) => issue.field === "amounts");
     const reviewFields = { ...options.review.fields };
     if (amountsIssue) reviewFields.amounts = amountsIssue.reason;

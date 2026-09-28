@@ -2,7 +2,11 @@ import type OpenAI from "openai";
 import sharp from "sharp";
 
 import { extractInvoiceDataV2, imageDetailForCurrentModel } from "@/lib/ai";
-import { letterForComprobanteCode, type ArcaFiscalData } from "@/lib/extraction-v2/arca-codes";
+import {
+  documentKindForComprobanteCode,
+  letterForComprobanteCode,
+  type ArcaFiscalData,
+} from "@/lib/extraction-v2/arca-codes";
 import { decodeArcaFiscalData } from "@/lib/extraction-v2/decode-arca";
 import { matchCuitAgainstMaestro, type MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
@@ -123,6 +127,8 @@ export function applyFiscalData(
     verifiedFields.push("invoice_type");
   }
   if (fiscal.comprobanteCode != null) out.afip_comprobante_code = String(fiscal.comprobanteCode).padStart(2, "0");
+  const kind = documentKindForComprobanteCode(fiscal.comprobanteCode);
+  if (kind) out.document_kind = kind;
   if (fiscal.total != null) {
     out.total_amount = fiscal.total;
     verifiedFields.push("total");
@@ -186,7 +192,12 @@ export async function extractInvoiceV2(
   }
 
   const prompt = systemPrompt(opts);
-  let extracted = await extractInvoiceDataV2({ systemPrompt: prompt, content, reasoningEffort: "low", pass: "v2" });
+  // Los datos del QR/ITF se aplican ANTES de validar: si el modelo erró un campo que el código
+  // ya trae exacto, no hace falta una 2da pasada por eso.
+  const withFiscal = (e: InvoiceExtraction) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
+  let extracted = withFiscal(
+    await extractInvoiceDataV2({ systemPrompt: prompt, content, reasoningEffort: "low", pass: "v2" }),
+  );
   let issues = validateExtraction(extracted, fiscal);
 
   if (issues.length > 0) {
@@ -198,9 +209,10 @@ export async function extractInvoiceV2(
       pass: "v2_retry",
       followUp: `Tu extracción anterior:\n${JSON.stringify(extracted)}\n\nNo pasó estas validaciones:\n${hints}\n\nRevisá esas zonas del documento con máximo cuidado y devolvé la extracción completa corregida. Si el valor realmente es así en el documento, mantenelo.`,
     });
-    const retryIssues = validateExtraction(retry, fiscal);
+    const retryFixed = withFiscal(retry);
+    const retryIssues = validateExtraction(retryFixed, fiscal);
     if (retryIssues.length <= issues.length) {
-      extracted = retry;
+      extracted = retryFixed;
       issues = retryIssues;
     }
   }
@@ -209,7 +221,7 @@ export async function extractInvoiceV2(
   let verifiedFields: VerifiedField[] = [];
   const extraIssues: ReviewIssue[] = [];
   if (fiscal) {
-    ({ extracted, verifiedFields } = applyFiscalData(extracted, fiscal));
+    verifiedFields = applyFiscalData(extracted, fiscal).verifiedFields;
   } else if (opts.maestro.length > 0 && extracted.cuit) {
     const match = matchCuitAgainstMaestro(opts.maestro, extracted.cuit, extracted.provider);
     if (match.status === "corrected") {
