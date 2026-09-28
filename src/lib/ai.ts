@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 
 import { acceptFiscalAuthSupplement } from "@/lib/document-class";
-import { invoiceExtractionSchemaV2 } from "@/lib/extraction-v2/prompt";
+import { invoiceExtractionSchemaV2, type InvoiceExtractionV2 } from "@/lib/extraction-v2/prompt";
 import { withOpenAIRetry } from "@/lib/openai-retry";
 import {
   invoiceExtractionSchema,
@@ -462,7 +462,7 @@ export async function extractInvoiceDataV2(params: {
   reasoningEffort?: ReasoningEffort;
   followUp?: string;
   pass: string;
-}): Promise<InvoiceExtraction> {
+}): Promise<InvoiceExtractionV2> {
   const openai = getOpenAI();
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: params.systemPrompt },

@@ -1,7 +1,8 @@
 import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
 import type { ArcaFiscalData } from "@/lib/extraction-v2/arca-codes";
 import type { ReviewFieldKey } from "@/lib/extraction-v2/review";
-import type { InvoiceExtraction } from "@/lib/schemas";
+import type { InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 export type ReviewIssue = {
   field: ReviewFieldKey;
@@ -21,7 +22,7 @@ const CAE_DIGITS = 14;
 const MAX_FUTURE_DAYS = 2;
 
 export function validateExtraction(
-  e: InvoiceExtraction & { other_taxes_amount?: number | null },
+  e: InvoiceExtractionV2Like,
   /**
    * Solo se usa para el texto del motivo: los datos del QR ya se aplicaron sobre `e` antes de
    * validar (el total leído por el modelo nunca queda en conflicto con el del QR).
@@ -39,11 +40,29 @@ export function validateExtraction(
     });
   }
 
+  // Se valida lo que se va a guardar y exportar: IVA y percepciones desde sus líneas si existen.
+  const vatLinesSum = sumTaxLines(e.vat_lines);
+  const perceptionLinesSum = sumTaxLines(e.perception_lines);
+  const vat = vatLinesSum ?? e.vat_amount;
+  const perceptions = perceptionLinesSum ?? e.perceptions_amount;
+  for (const [label, linesSum, scalar] of [
+    ["IVA", vatLinesSum, e.vat_amount],
+    ["percepciones", perceptionLinesSum, e.perceptions_amount],
+  ] as const) {
+    if (linesSum != null && scalar != null && Math.abs(linesSum - scalar) > TOLERANCE) {
+      issues.push({
+        field: "amounts",
+        reason: `El detalle de ${label} suma ${linesSum.toFixed(2)} pero el total de ${label} leído es ${scalar.toFixed(2)}.`,
+        retryHint: `Las líneas de ${label} suman ${linesSum.toFixed(2)} pero el total de ${label} es ${scalar}. Releé cada renglón de ${label} y su total.`,
+      });
+    }
+  }
+
   if (e.net_amount != null && e.total_amount != null) {
     // Otros tributos (impuestos internos, ITC) también suman al total: sin ellos, comprobantes
     // de combustibles o telecomunicaciones quedarían marcados aunque estén bien leídos.
     const sum =
-      e.net_amount + (e.vat_amount ?? 0) + (e.perceptions_amount ?? 0) + (e.other_taxes_amount ?? 0);
+      e.net_amount + (vat ?? 0) + (perceptions ?? 0) + (e.other_taxes_amount ?? 0);
     if (Math.abs(sum - e.total_amount) > TOLERANCE) {
       issues.push({
         field: "amounts",
@@ -51,7 +70,7 @@ export function validateExtraction(
           fiscal?.total != null
             ? `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total del QR de ARCA (${e.total_amount.toFixed(2)}, exacto): revisá el desglose.`
             : `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
-        retryHint: `Neto ${e.net_amount} + IVA ${e.vat_amount ?? 0} + percepciones ${e.perceptions_amount ?? 0} = ${sum.toFixed(2)}, pero el total es ${e.total_amount}. Releé los importes del recuadro de totales dígito por dígito en la ampliación del pie.`,
+        retryHint: `Neto ${e.net_amount} + IVA ${vat ?? 0} + percepciones ${perceptions ?? 0} = ${sum.toFixed(2)}, pero el total es ${e.total_amount}. Releé los importes del recuadro de totales dígito por dígito en la ampliación del pie.`,
       });
     }
   }
@@ -65,7 +84,7 @@ export function validateExtraction(
   }
 
   if (e.invoice_date) {
-    const valid = /^\d{4}-\d{2}-\d{2}$/.test(e.invoice_date) && !Number.isNaN(Date.parse(`${e.invoice_date}T00:00:00Z`));
+    const valid = isRealCalendarDate(e.invoice_date);
     if (!valid) {
       issues.push({
         field: "invoice_date",
@@ -82,4 +101,13 @@ export function validateExtraction(
   }
 
   return issues;
+}
+
+/** YYYY-MM-DD que existe en el calendario (Date.parse acepta "2026-02-30" y lo corre a marzo). */
+function isRealCalendarDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
 }

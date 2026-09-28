@@ -16,11 +16,12 @@ import {
 } from "@/lib/extraction-v2/maestro-cuit";
 import { otherTaxesOf } from "@/lib/extraction-v2/amounts-as-read";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
+import { normalizeNumeroComprobanteFromAiOrNull } from "@/lib/numero-comprobante";
 import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
-import type { InvoiceExtraction } from "@/lib/schemas";
+import type { InvoiceExtractionV2, InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
 
 /**
  * Pipeline de extracción v2, pensado para GPT-6 Luna (medido contra un set de referencia de
@@ -48,7 +49,7 @@ export type ExtractionV2Options = {
 };
 
 export type ExtractionV2Result = {
-  extracted: InvoiceExtraction;
+  extracted: InvoiceExtractionV2;
   rawOcrText: string | null;
   /** Páginas originales (para pasadas focalizadas posteriores, p. ej. bonificaciones). */
   visionImages: VisionImage[];
@@ -112,7 +113,10 @@ function systemPrompt(opts: ExtractionV2Options): string {
   return blocks.length ? `${EXTRACTION_SYSTEM_PROMPT_V2}\n\n---\n${blocks.join("\n\n---\n")}` : EXTRACTION_SYSTEM_PROMPT_V2;
 }
 
+let warnedUnmeasuredModel = false;
+
 const CUIT_MAX_READ_DISTANCE = 2;
+const NUMBER_MAX_READ_DISTANCE = 2;
 const QR_TOTAL_MISMATCH_RATIO = 0.005;
 const SUM_TOLERANCE = 0.05;
 
@@ -122,7 +126,7 @@ const SUM_TOLERANCE = 0.05;
  * no con el del QR.
  */
 export function compareQrWithPrintedReading(
-  read: InvoiceExtraction & { other_taxes_amount?: number | null },
+  read: InvoiceExtractionV2Like,
   qr: ArcaFiscalData,
 ): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
@@ -132,6 +136,19 @@ export function compareQrWithPrintedReading(
       field: "cuit",
       reason: `El CUIT del QR (${qr.cuit}) no coincide con el impreso en el comprobante (${read.cuit}).`,
     });
+  }
+  // Mismo emisor pero otro comprobante: el número impreso difiere del QR más que un error de OCR.
+  const printed = normalizeNumeroComprobanteFromAiOrNull(read.invoice_number);
+  const m = printed ? /^(\d+)-(\d+)$/.exec(printed) : null;
+  if (m && qr.pointOfSale != null && qr.number != null) {
+    const printedDigits = `${Number(m[1])}-${Number(m[2])}`;
+    const qrDigits = `${qr.pointOfSale}-${qr.number}`;
+    if (levenshtein(printedDigits, qrDigits) > NUMBER_MAX_READ_DISTANCE) {
+      issues.push({
+        field: "invoice_number",
+        reason: `El número del QR (${String(qr.pointOfSale).padStart(5, "0")}-${String(qr.number).padStart(8, "0")}) no coincide con el impreso (${printed}).`,
+      });
+    }
   }
   if (qr.total != null && read.total_amount != null && read.net_amount != null) {
     const sum =
@@ -184,7 +201,8 @@ export async function extractInvoiceV2(
     }
   }
   if (pages.length === 0) throw new Error("No hay páginas para procesar.");
-  if (imageDetailForCurrentModel() !== "original") {
+  if (imageDetailForCurrentModel() !== "original" && !warnedUnmeasuredModel) {
+    warnedUnmeasuredModel = true;
     console.warn(
       `[extraction-v2] corriendo sobre ${currentOpenAIModel()}: el pipeline v2 se midió con gpt-6-luna. Revisá OPENAI_MODEL.`,
     );
@@ -248,7 +266,12 @@ export async function extractInvoiceV2(
   // comprobante) puede traer datos que no coinciden con lo impreso. Se contrasta con la
   // primera lectura del modelo y, si difiere claramente, se marca para revisar.
   const qrMismatch = fiscal?.source === "QR" ? compareQrWithPrintedReading(first, fiscal) : [];
-  const withFiscal = (e: InvoiceExtraction) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
+  // CUIT o número muy distintos a lo impreso: el QR es de otro comprobante y no se aplica
+  // (queda todo marcado para revisar). Si solo difiere el total, se aplica pero sin afirmarlo.
+  if (qrMismatch.some((i) => i.field === "cuit" || i.field === "invoice_number")) {
+    fiscal = null;
+  }
+  const withFiscal = (e: InvoiceExtractionV2) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
   let extracted = withFiscal(first);
   let issues = validateExtraction(extracted, fiscal);
 

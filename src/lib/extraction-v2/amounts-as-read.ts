@@ -1,12 +1,11 @@
 import { reconcileAmounts } from "@/lib/amount-reconcile";
 import type { FinalizedAmounts } from "@/lib/extraction-amounts";
-import type { InvoiceExtraction } from "@/lib/schemas";
-
-type WithOtherTaxes = InvoiceExtraction & { other_taxes_amount?: number | null };
+import type { InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
+import { sumTaxLines } from "@/lib/tax-lines";
 
 /** Otros tributos (impuestos internos, ITC) leídos por v2; 0 si no hay. */
-export function otherTaxesOf(e: InvoiceExtraction): number {
-  const v = (e as WithOtherTaxes).other_taxes_amount;
+export function otherTaxesOf(e: InvoiceExtractionV2Like): number {
+  const v = e.other_taxes_amount;
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
 }
 
@@ -20,25 +19,29 @@ export function otherTaxesOf(e: InvoiceExtraction): number {
  * lectura se corrige con validación + 2da pasada; lo que no cierre queda marcado, nunca se
  * completa en silencio.
  */
-export function amountsAsRead(e: InvoiceExtraction): FinalizedAmounts {
+export function amountsAsRead(e: InvoiceExtractionV2Like): FinalizedAmounts {
   const other = otherTaxesOf(e);
+  // IVA y percepciones salen de sus líneas cuando existen (misma regla que legacy): el JSON
+  // contable del ERP se arma con las líneas, y las columnas guardadas deben coincidir con él.
+  const vat = sumTaxLines(e.vat_lines) ?? e.vat_amount;
+  const perceptions = sumTaxLines(e.perception_lines) ?? e.perceptions_amount;
   // `amounts_reconciled` / `amounts_discrepancy` se siguen guardando por compatibilidad: se
   // calculan sobre el total SIN otros tributos, que no son parte de neto + IVA + percepciones.
   const reconcile = reconcileAmounts({
     net: e.net_amount,
-    vat: e.vat_amount,
-    perceptions: e.perceptions_amount,
+    vat,
+    perceptions,
     total: e.total_amount != null ? Math.round((e.total_amount - other) * 100) / 100 : null,
   });
   return {
     netAmount: e.net_amount,
-    vatAmount: e.vat_amount,
-    perceptionsAmount: e.perceptions_amount,
+    vatAmount: vat,
+    perceptionsAmount: perceptions,
     totalAmount: e.total_amount,
     amountsReconciled: reconcile.reconciled,
     amountsDiscrepancy: reconcile.reconciled ? null : reconcile.discrepancy,
     amountsAlgebraicallyDerived: false,
     correctedField: null,
-    extracted: e,
+    extracted: { ...e, vat_amount: vat, perceptions_amount: perceptions },
   };
 }

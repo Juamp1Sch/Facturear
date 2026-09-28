@@ -59,7 +59,8 @@ export function parseArcaQrText(text: string): ArcaFiscalData | null {
     const o = j as Record<string, unknown>;
     const cuit = o.cuit != null ? formatCuit(o.cuit as string | number) : null;
     const authCode = o.codAut != null ? String(o.codAut).replace(/\D/g, "") : "";
-    if (!cuit || !authCode) return null;
+    // CAE/CAEA tienen 14 dígitos: si no, el QR no se toma como confiable.
+    if (!cuit || authCode.length !== 14) return null;
     const fecha = typeof o.fecha === "string" ? o.fecha : "";
     const date = /^\d{2}\/\d{2}\/\d{4}$/.test(fecha)
       ? fecha.split("/").reverse().join("-")
@@ -71,13 +72,17 @@ export function parseArcaQrText(text: string): ArcaFiscalData | null {
       const n = Number(v);
       return v === "" || !Number.isFinite(n) ? undefined : n; // descarta NaN e Infinity ("1e999")
     };
+    const positiveInt = (v: unknown) => {
+      const n = num(v);
+      return n != null && Number.isInteger(n) && n > 0 ? n : undefined;
+    };
     return {
       source: "QR",
       cuit,
       date,
-      pointOfSale: num(o.ptoVta),
-      number: num(o.nroCmp),
-      comprobanteCode: num(o.tipoCmp),
+      pointOfSale: positiveInt(o.ptoVta),
+      number: positiveInt(o.nroCmp),
+      comprobanteCode: positiveInt(o.tipoCmp),
       total: num(o.importe),
       currency: typeof o.moneda === "string" ? o.moneda : undefined,
       exchangeRate: num(o.ctz),
@@ -130,10 +135,10 @@ export function documentKindForComprobanteCode(
 }
 
 /** Pisa la lectura del modelo con los datos exactos del código y devuelve qué campos aplicó. */
-export function applyFiscalData(
-  e: InvoiceExtraction,
+export function applyFiscalData<T extends InvoiceExtraction>(
+  e: T,
   fiscal: ArcaFiscalData,
-): { extracted: InvoiceExtraction; verifiedFields: VerifiedField[] } {
+): { extracted: T; verifiedFields: VerifiedField[] } {
   const out = { ...e, cuit: fiscal.cuit, fiscal_auth_type: fiscal.authType, fiscal_auth_code: fiscal.authCode };
   const verifiedFields: VerifiedField[] = ["cuit", "fiscal_auth"];
   if (fiscal.date) {

@@ -1,0 +1,30 @@
+name: Unit tests
+
+# Corre `npm run test:unit` (Node test runner vía tsx) en cada PR. No necesita base de datos:
+# `npm ci` ya ejecuta `prisma generate` en el postinstall.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm run test:unit

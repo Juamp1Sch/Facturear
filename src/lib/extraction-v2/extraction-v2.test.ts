@@ -67,7 +67,7 @@ test("dígito verificador RG 1702 sobre códigos reales", () => {
 });
 
 test("QR: host que no es de ARCA, % malformado o JSON null → null sin tirar", () => {
-  const payload = Buffer.from(JSON.stringify({ cuit: 30000000007, codAut: 1 })).toString("base64");
+  const payload = Buffer.from(JSON.stringify({ cuit: 30000000007, codAut: 70417054367476 })).toString("base64");
   assert.equal(parseArcaQrText(`https://evil.example.com/fe/qr/?p=${payload}`), null);
   assert.ok(parseArcaQrText(`https://serviciosweb.afip.gob.ar/fe/qr/?p=${payload}`));
   assert.equal(parseArcaQrText("https://www.afip.gob.ar/fe/qr/?p=%E0%A4%A"), null);
@@ -104,6 +104,8 @@ const base: InvoiceExtraction = {
   total_amount: 1546.72, chart_account_code: null, exchange_rate: null, confidence: 0.9,
 };
 const now = new Date("2026-02-01T12:00:00Z");
+/** Lo que devuelve el modelo en v2 (incluye other_taxes_amount). */
+const baseV2 = { ...base, other_taxes_amount: null };
 
 test("validación: extracción consistente no marca nada", () => {
   assert.deepEqual(validateExtraction(base, null, now), []);
@@ -219,7 +221,7 @@ async function tinyPage(): Promise<Buffer> {
 const noMaestro = { maestroCuitHintsBlock: null, chartAccountHintsBlock: null, maestro: [] };
 type ExtractArgs = { content: unknown[]; followUp?: string };
 
-test("pipeline: QR que no coincide con lo impreso queda marcado y no se afirma como verificado", async () => {
+test("pipeline: QR de otro comprobante (CUIT distinto) no se aplica y queda todo marcado", async () => {
   const { extractInvoiceV2 } = await import("./pipeline");
   const calls: ExtractArgs[] = [];
   const qr = { source: "QR" as const, cuit: "30-50289158-4", total: 2000, pointOfSale: 6, number: 128741, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
@@ -227,16 +229,40 @@ test("pipeline: QR que no coincide con lo impreso queda marcado y no se afirma c
     decode: async () => qr,
     extract: async (args) => {
       calls.push(args as ExtractArgs);
-      return base; // lectura impresa: CUIT 30-71178446-9, total 1546,72 que cierra con su desglose
+      return baseV2;
     },
   });
   assert.equal(JSON.stringify(calls[0]!.content).includes("decodificad"), false, "lectura ciega");
-  assert.equal(r.extracted.total_amount, 2000, "el QR se aplica igual");
+  assert.equal(r.extracted.cuit, base.cuit, "no se aplica el QR");
+  assert.equal(r.extracted.total_amount, base.total_amount);
+  assert.equal(r.review.verifiedBy, null);
+  assert.deepEqual(r.review.verifiedFields, []);
   assert.ok(r.review.fields.cuit, "CUIT marcado");
-  assert.ok(r.review.fields.amounts, "importes marcados");
-  assert.equal(r.review.verifiedFields?.includes("cuit"), false);
+});
+
+test("pipeline: QR del mismo comprobante con total distinto se aplica pero el total no se afirma", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const qr = { source: "QR" as const, cuit: base.cuit!, total: 2000, pointOfSale: 6, number: 128741, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => qr,
+    extract: async () => baseV2,
+  });
+  assert.equal(r.extracted.total_amount, 2000);
+  assert.ok(r.review.fields.amounts);
   assert.equal(r.review.verifiedFields?.includes("total"), false);
-  assert.ok(r.review.verifiedFields?.includes("invoice_number"));
+  assert.ok(r.review.verifiedFields?.includes("cuit"));
+});
+
+test("pipeline: QR del mismo emisor pero OTRO número no se aplica", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const qr = { source: "QR" as const, cuit: base.cuit!, total: base.total_amount!, pointOfSale: 6, number: 555, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => qr,
+    extract: async () => baseV2,
+  });
+  assert.equal(r.review.verifiedBy, null);
+  assert.ok(r.review.fields.invoice_number);
+  assert.equal(r.extracted.invoice_number, base.invoice_number);
 });
 
 test("pipeline: una validación que falla dispara UNA 2da pasada con el motivo", async () => {
@@ -246,7 +272,7 @@ test("pipeline: una validación que falla dispara UNA 2da pasada con el motivo",
     decode: async () => null,
     extract: async (args) => {
       calls.push(args as ExtractArgs);
-      return calls.length === 1 ? { ...base, cuit: "30-71178446-8" } : base;
+      return calls.length === 1 ? { ...baseV2, cuit: "30-71178446-8" } : baseV2;
     },
   });
   assert.equal(calls.length, 2);
@@ -260,8 +286,31 @@ test("pipeline: un ITF cuyo CUIT no es el del emisor impreso se descarta", async
   const itf = { source: "ITF" as const, cuit: "30-50289158-4", authType: "CAE" as const, authCode: "11111111111111" };
   const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
     decode: async () => itf,
-    extract: async () => base,
+    extract: async () => baseV2,
   });
   assert.equal(r.review.verifiedBy, null);
   assert.equal(r.extracted.fiscal_auth_code, base.fiscal_auth_code);
+});
+
+test("validación: líneas de IVA/percepciones que no suman el escalar, y fecha inexistente", () => {
+  const vatLines = [{ label: "IVA 21%", amount: 200 }];
+  assert.deepEqual(
+    validateExtraction({ ...base, vat_lines: vatLines }, null, now).map((i) => i.field),
+    ["amounts", "amounts"], // líneas ≠ escalar, y la suma con las líneas ya no cierra
+  );
+  assert.deepEqual(validateExtraction({ ...base, invoice_date: "2026-01-31" }, null, now), []);
+  assert.deepEqual(validateExtraction({ ...base, invoice_date: "2026-02-30" }, null, now).map((i) => i.field), ["invoice_date"]);
+});
+
+test("amountsAsRead: IVA y percepciones salen de sus líneas (como el JSON del ERP)", () => {
+  const r = amountsAsRead({ ...base, perception_lines: [{ label: "Perc IIBB", amount: 50, kind: "IIBB" }] });
+  assert.equal(r.perceptionsAmount, 50);
+  assert.equal(r.extracted.perceptions_amount, 50);
+});
+
+test("QR: punto de venta/número deben ser enteros positivos y el CAE de 14 dígitos", () => {
+  const ok = parseArcaQrText(qrUrl({ cuit: 30000000007, codAut: 70417054367476, ptoVta: 1.5, nroCmp: -3, tipoCmp: 1 }));
+  assert.equal(ok?.pointOfSale, undefined);
+  assert.equal(ok?.number, undefined);
+  assert.equal(parseArcaQrText(qrUrl({ cuit: 30000000007, codAut: 123 })), null);
 });

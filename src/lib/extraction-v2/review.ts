@@ -4,6 +4,7 @@
  */
 export type ReviewFieldKey =
   | "cuit"
+  | "invoice_number"
   | "invoice_date"
   | "amounts"
   | "fiscal_auth"
@@ -11,6 +12,7 @@ export type ReviewFieldKey =
 
 const REVIEW_FIELD_KEYS: readonly ReviewFieldKey[] = [
   "cuit",
+  "invoice_number",
   "invoice_date",
   "amounts",
   "fiscal_auth",

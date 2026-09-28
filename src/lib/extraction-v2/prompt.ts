@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { invoiceExtractionSchema, taxBreakdownLineSchema } from "@/lib/schemas";
+import { invoiceExtractionSchema, taxBreakdownLineSchema, type InvoiceExtraction } from "@/lib/schemas";
 
 /**
  * Mismos campos y tipos que `invoiceExtractionSchema` (el resto del sistema no cambia), pero
@@ -44,6 +44,14 @@ export const invoiceExtractionSchemaV2 = invoiceExtractionSchema.extend({
     .describe("Pesos por dólar, solo si el comprobante informa un tipo de cambio. null si no."),
   confidence: z.number().min(0).max(1).describe("Tu confianza real (0 a 1) en que todos los campos son correctos."),
 });
+
+/** Extracción v2: los campos de siempre + `other_taxes_amount`. */
+export type InvoiceExtractionV2 = z.infer<typeof invoiceExtractionSchemaV2>;
+
+/** Una extracción de cualquier pipeline: `other_taxes_amount` solo lo trae v2. */
+export type InvoiceExtractionV2Like = InvoiceExtraction & {
+  other_taxes_amount?: InvoiceExtractionV2["other_taxes_amount"];
+};
 
 export const EXTRACTION_SYSTEM_PROMPT_V2 = `Sos un experto en comprobantes comerciales y fiscales de Argentina. Extraé los datos del documento con precisión absoluta: cada dígito importa porque se carga en la contabilidad.
 
