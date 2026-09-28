@@ -26,6 +26,7 @@ import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extr
 import { detectDocumentText } from "@/lib/extraction-v2/textract";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
 import { runOcr } from "@/lib/ocr";
+import { sumTaxLines } from "@/lib/tax-lines";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
 import type { InvoiceExtractionV2, InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
 
@@ -158,8 +159,10 @@ export function compareQrWithPrintedReading(
     }
   }
   if (qr.total != null && read.total_amount != null && read.net_amount != null) {
-    const sum =
-      read.net_amount + (read.vat_amount ?? 0) + (read.perceptions_amount ?? 0) + (read.other_taxes_amount ?? 0);
+    // Misma regla que la validación: IVA y percepciones desde sus líneas si existen.
+    const vat = sumTaxLines(read.vat_lines) ?? read.vat_amount ?? 0;
+    const perceptions = sumTaxLines(read.perception_lines) ?? read.perceptions_amount ?? 0;
+    const sum = read.net_amount + vat + perceptions + (read.other_taxes_amount ?? 0);
     const printedCloses = Math.abs(sum - read.total_amount) <= SUM_TOLERANCE;
     const differs = Math.abs(read.total_amount - qr.total) > Math.max(SUM_TOLERANCE, qr.total * QR_TOTAL_MISMATCH_RATIO);
     if (printedCloses && differs) {

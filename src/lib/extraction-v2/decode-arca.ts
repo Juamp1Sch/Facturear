@@ -113,7 +113,10 @@ export async function decodeArcaFiscalData(pages: DecodePage[]): Promise<ArcaFis
       }
     }
   } catch (err) {
-    // Sin QR legible se sigue solo con el modelo: nunca debe cortar la extracción.
+    // Sin QR legible se sigue solo con el modelo: nunca debe cortar la extracción. El módulo
+    // wasm se vuelve a cargar en el próximo intento (un fallo interno puede dejarlo inservible
+    // para toda la instancia).
+    ready = null;
     console.error("[extraction-v2] decodeArcaFiscalData falló", err);
   }
   return itfFallback;

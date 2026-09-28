@@ -44,8 +44,14 @@ export function ocrCandidates(text: string, now: Date = new Date()): OcrCandidat
       if (digits.length === 14) auth.add(digits);
     }
   });
-  // Número de comprobante con punto de venta: PV (4-5 dígitos) - número (8 dígitos).
+  // Número de comprobante con punto de venta: PV (4-5 dígitos) - número (8 dígitos), o el
+  // formato de ARCA con recuadros separados ("Punto de Venta: 00002  Comp. Nro: 00000123").
+  // Sin este último, en ese formato solo se leería otra referencia con guion (remito asociado,
+  // orden de compra) y se marcaría un número correcto.
   for (const m of t.matchAll(/(?<!\d)(\d{4,5})\s*[-–—]\s*(\d{8})(?!\d)/g)) {
+    number.add(`${Number(m[1])}-${Number(m[2])}`);
+  }
+  for (const m of t.matchAll(/Punto\s*de\s*Venta\s*:?\s*(\d{1,5})[\s\S]{0,60}?Comp(?:robante)?\.?\s*N(?:ro|°|º|o)?\.?\s*:?\s*(\d{1,8})(?!\d)/gi)) {
     number.add(`${Number(m[1])}-${Number(m[2])}`);
   }
   // Fechas dd/mm/aaaa (o aa), con / - o . como separador. Un año de 2 dígitos mayor al actual

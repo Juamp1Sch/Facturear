@@ -479,3 +479,10 @@ test("OCR: dígitos partidos solo forman un CAE junto a la etiqueta; años de 2 
   assert.deepEqual([...ocrCandidates("Fecha 05/06/26", now).date], ["2026-06-05"]);
 });
 
+test("OCR: número en el formato de ARCA con recuadros separados", () => {
+  const text = "Punto de Venta: 00006   Comp. Nro: 00128741\nRemito asociado 0001-00004567";
+  const c = ocrCandidates(text);
+  assert.ok(c.number.has("6-128741"));
+  assert.deepEqual(crossCheckWithOcr(baseV2, text).filter((i) => i.field === "invoice_number"), []);
+});
+
