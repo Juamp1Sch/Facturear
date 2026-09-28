@@ -3,6 +3,7 @@ import type {
   InvoiceExtraction,
   TaxBreakdownLine,
 } from "@/lib/schemas";
+import { otherTaxesOf } from "@/lib/extraction-v2/amounts-as-read";
 import { sumTaxLines } from "@/lib/tax-lines";
 
 export type DiscountSourceId = "computed" | "ia" | "supplement" | "ocr";
@@ -229,7 +230,7 @@ function amountsReconcileWithoutDiscount(extracted: InvoiceExtraction): boolean 
   if (net == null || total == null) return false;
   // Otros tributos (impuestos internos, ITC) de la extracción v2 también suman al total: sin
   // ellos, un comprobante de combustible "no cerraría" y dispararía la pasada de bonificaciones.
-  const otherTaxes = (extracted as { other_taxes_amount?: number | null }).other_taxes_amount ?? 0;
+  const otherTaxes = otherTaxesOf(extracted);
   const sum = roundMoney(
     net + (extracted.vat_amount ?? 0) + (extracted.perceptions_amount ?? 0) + otherTaxes,
   );

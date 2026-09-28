@@ -48,6 +48,7 @@ import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import {
+  cuitDigitsOnly,
   normalizeArgentineCuitFromAiOrNull,
   validateArgentineCuitForEntry,
 } from "@/lib/cuit-argentina";
@@ -398,7 +399,7 @@ async function applyExtractionToInvoice(
   // Si el match por nombre terminó usando otro CUIT que el leído, el motivo de "Revisar" tiene que
   // hablar del CUIT que se guarda (la marca se mantiene: el match por nombre no es verificación).
   const review =
-    options?.review && providerCuit && providerCuit !== aiCuit
+    options?.review && providerCuit && cuitDigitsOnly(providerCuit) !== cuitDigitsOnly(aiCuit)
       ? {
           ...options.review,
           fields: {
