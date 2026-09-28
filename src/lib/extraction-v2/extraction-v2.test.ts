@@ -9,7 +9,7 @@ import {
   parseArcaQrText,
 } from "./arca-codes";
 import { matchCuitAgainstMaestro, supplierNameSimilarity } from "./maestro-cuit";
-import { lockQrTotal } from "./qr-total";
+import { amountsAsRead } from "./amounts-as-read";
 import { readExtractionReview } from "./review";
 import { validateExtraction } from "./validate";
 import type { InvoiceExtraction } from "../schemas";
@@ -156,21 +156,6 @@ test("readExtractionReview: tolera datos persistidos corruptos", () => {
   assert.equal(r?.verifiedBy, "QR");
 });
 
-test("lockQrTotal: restaura el total del QR si la reconciliación lo cambió", () => {
-  const finalized = {
-    netAmount: 100, vatAmount: 21, perceptionsAmount: 0, totalAmount: 121,
-    amountsReconciled: true, amountsDiscrepancy: null, amountsAlgebraicallyDerived: true,
-    correctedField: ["total" as const], extracted: { ...base, total_amount: 121 },
-  };
-  const locked = lockQrTotal(finalized, 130);
-  assert.equal(locked.totalAmount, 130);
-  assert.equal(locked.extracted.total_amount, 130);
-  assert.equal(locked.amountsReconciled, false);
-  assert.equal(locked.correctedField, null);
-  assert.equal(locked.amountsAlgebraicallyDerived, false);
-  assert.equal(lockQrTotal(finalized, null), finalized);
-});
-
 test("readExtractionReview: descarta motivos que no son texto y correcciones mal formadas", () => {
   const r = readExtractionReview({
     review: { version: 2, fields: { cuit: { x: 1 }, amounts: "ok", foo: "bar" }, cuitCorrection: { to: 5 } },
@@ -204,19 +189,6 @@ test("maestro: un nombre genérico de una palabra no iguala a uno más específi
   assert.equal(supplierNameSimilarity("JELUZ S.A.C.I.F.I. Y A.", "JELUZ S A C I F I Y A"), 1);
 });
 
-test("otros tributos: se excluyen de la reconciliación y se suman de vuelta", async () => {
-  const { excludeOtherTaxes, otherTaxesOf, restoreOtherTaxes } = await import("./qr-total");
-  const e = { ...base, net_amount: 1000, vat_amount: 210, perceptions_amount: 0, total_amount: 1310, other_taxes_amount: 100 } as InvoiceExtraction;
-  assert.equal(otherTaxesOf(e), 100);
-  assert.equal(excludeOtherTaxes(e).total_amount, 1210);
-  const finalized = {
-    netAmount: 1000, vatAmount: 210, perceptionsAmount: 0, totalAmount: 1210, amountsReconciled: true,
-    amountsDiscrepancy: null, amountsAlgebraicallyDerived: false, correctedField: null, extracted: { ...e, total_amount: 1210 },
-  };
-  assert.equal(restoreOtherTaxes(finalized, 100).totalAmount, 1310);
-  assert.equal(restoreOtherTaxes(finalized, 0), finalized);
-});
-
 test("QR vs lo impreso: marca CUIT muy distinto y total impreso que cierra pero difiere", async () => {
   const { compareQrWithPrintedReading } = await import("./pipeline");
   const qr = { source: "QR" as const, cuit: "30-71178446-9", total: 1546.72, authType: "CAE" as const, authCode: "86041474598043" };
@@ -225,4 +197,71 @@ test("QR vs lo impreso: marca CUIT muy distinto y total impreso que cierra pero 
   assert.deepEqual(compareQrWithPrintedReading({ ...base, cuit: "30-50289158-4" }, qr).map((i) => i.field), ["cuit"]);
   const otherTotal = { ...qr, total: 2000 };
   assert.deepEqual(compareQrWithPrintedReading(base, otherTotal).map((i) => i.field), ["amounts"]);
+});
+
+test("amountsAsRead: no inventa percepciones para cerrar contra el total", () => {
+  // Total del QR 2000 con desglose leído que suma 1546,72: se guarda tal cual y queda sin cerrar.
+  const r = amountsAsRead({ ...base, total_amount: 2000 });
+  assert.equal(r.perceptionsAmount, base.perceptions_amount);
+  assert.equal(r.totalAmount, 2000);
+  assert.equal(r.amountsReconciled, false);
+  assert.equal(r.amountsAlgebraicallyDerived, false);
+  // Otros tributos: la reconciliación informativa se calcula sin ellos.
+  const withOther = amountsAsRead({ ...base, total_amount: 1646.72, other_taxes_amount: 100 } as InvoiceExtraction);
+  assert.equal(withOther.amountsReconciled, true);
+});
+
+// ---- extractInvoiceV2 de punta a punta, con modelo y lector de códigos simulados ----
+async function tinyPage(): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
+  return sharp({ create: { width: 400, height: 560, channels: 3, background: "#ffffff" } }).jpeg().toBuffer();
+}
+const noMaestro = { maestroCuitHintsBlock: null, chartAccountHintsBlock: null, maestro: [] };
+type ExtractArgs = { content: unknown[]; followUp?: string };
+
+test("pipeline: QR que no coincide con lo impreso queda marcado y no se afirma como verificado", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const calls: ExtractArgs[] = [];
+  const qr = { source: "QR" as const, cuit: "30-50289158-4", total: 2000, pointOfSale: 6, number: 128741, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => qr,
+    extract: async (args) => {
+      calls.push(args as ExtractArgs);
+      return base; // lectura impresa: CUIT 30-71178446-9, total 1546,72 que cierra con su desglose
+    },
+  });
+  assert.equal(JSON.stringify(calls[0]!.content).includes("decodificad"), false, "lectura ciega");
+  assert.equal(r.extracted.total_amount, 2000, "el QR se aplica igual");
+  assert.ok(r.review.fields.cuit, "CUIT marcado");
+  assert.ok(r.review.fields.amounts, "importes marcados");
+  assert.equal(r.review.verifiedFields?.includes("cuit"), false);
+  assert.equal(r.review.verifiedFields?.includes("total"), false);
+  assert.ok(r.review.verifiedFields?.includes("invoice_number"));
+});
+
+test("pipeline: una validación que falla dispara UNA 2da pasada con el motivo", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const calls: ExtractArgs[] = [];
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => null,
+    extract: async (args) => {
+      calls.push(args as ExtractArgs);
+      return calls.length === 1 ? { ...base, cuit: "30-71178446-8" } : base;
+    },
+  });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1]!.followUp ?? "", /dígito verificador/);
+  assert.equal(r.extracted.cuit, "30-71178446-9");
+  assert.equal(r.review.fields.cuit, undefined);
+});
+
+test("pipeline: un ITF cuyo CUIT no es el del emisor impreso se descarta", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const itf = { source: "ITF" as const, cuit: "30-50289158-4", authType: "CAE" as const, authCode: "11111111111111" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => itf,
+    extract: async () => base,
+  });
+  assert.equal(r.review.verifiedBy, null);
+  assert.equal(r.extracted.fiscal_auth_code, base.fiscal_auth_code);
 });

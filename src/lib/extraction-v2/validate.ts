@@ -49,8 +49,8 @@ export function validateExtraction(
         field: "amounts",
         reason:
           fiscal?.total != null
-            ? `Neto + IVA + percepciones (${sum.toFixed(2)}) no coincide con el total del QR de ARCA (${e.total_amount.toFixed(2)}, exacto): revisá el desglose.`
-            : `Neto + IVA + percepciones (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
+            ? `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total del QR de ARCA (${e.total_amount.toFixed(2)}, exacto): revisá el desglose.`
+            : `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
         retryHint: `Neto ${e.net_amount} + IVA ${e.vat_amount ?? 0} + percepciones ${e.perceptions_amount ?? 0} = ${sum.toFixed(2)}, pero el total es ${e.total_amount}. Releé los importes del recuadro de totales dígito por dígito en la ampliación del pie.`,
       });
     }

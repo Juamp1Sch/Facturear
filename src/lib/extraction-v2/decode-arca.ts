@@ -38,6 +38,9 @@ async function loadZXing(): Promise<void> {
 
 type Decoded = { qr: ArcaFiscalData | null; itf: ArcaFiscalData | null };
 
+const ENLARGE_BELOW_MIN_SIDE_PX = 1800;
+const ENLARGE_MAX_SIDE_PX = 4000;
+
 /** Decodifica un bitmap RGBA. El QR tiene prioridad: trae fecha, número, letra y total. */
 async function decodeRgba(img: sharp.Sharp): Promise<Decoded> {
   // toColourspace: JPG en CMYK darían 5 canales y se descartarían.
@@ -94,10 +97,13 @@ export async function decodeArcaFiscalData(pages: DecodePage[]): Promise<ArcaFis
       const meta = await sharp(oriented).metadata();
       const w = meta.width ?? 0;
       const h = meta.height ?? 0;
-      if (w > 0 && h > 0 && Math.min(w, h) < 2500) {
+      // Solo fotos chicas (típicas de WhatsApp) y con tope: una foto grande ampliada x2 en RGBA
+      // pesa >100 MB y en serverless se suma a las demás imágenes en proceso.
+      const scale = Math.min(2, ENLARGE_MAX_SIDE_PX / Math.max(w, h));
+      if (w > 0 && h > 0 && Math.min(w, h) < ENLARGE_BELOW_MIN_SIDE_PX && scale > 1.2) {
         const enlarged = await decodeRgba(
           sharp(oriented)
-            .resize(w * 2, h * 2, { kernel: sharp.kernel.lanczos3 })
+            .resize(Math.round(w * scale), Math.round(h * scale), { kernel: sharp.kernel.lanczos3 })
             // En color (no grayscale): zxing necesita RGBA y la ampliación + contraste alcanza.
             .normalize()
             .sharpen({ sigma: 1.5 }),

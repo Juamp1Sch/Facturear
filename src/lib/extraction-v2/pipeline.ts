@@ -14,6 +14,7 @@ import {
   matchCuitAgainstMaestro,
   type MaestroSupplier,
 } from "@/lib/extraction-v2/maestro-cuit";
+import { otherTaxesOf } from "@/lib/extraction-v2/amounts-as-read";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
 import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
@@ -147,10 +148,19 @@ export function compareQrWithPrintedReading(
   return issues;
 }
 
+/** Dependencias externas, inyectables en tests (modelo y lector de códigos). */
+export type ExtractionV2Deps = {
+  extract: typeof extractInvoiceDataV2;
+  decode: typeof decodeArcaFiscalData;
+};
+
 export async function extractInvoiceV2(
   parts: ExtractionPart[],
   opts: ExtractionV2Options,
+  deps: Partial<ExtractionV2Deps> = {},
 ): Promise<ExtractionV2Result> {
+  const extract = deps.extract ?? extractInvoiceDataV2;
+  const decode = deps.decode ?? decodeArcaFiscalData;
   const pages: Buffer[] = [];
   const decodePages: DecodePage[] = [];
   const visionImages: VisionImage[] = [];
@@ -181,7 +191,7 @@ export async function extractInvoiceV2(
   }
 
   const [decoded, preparedPages, headerCrop, footerCrop] = await Promise.all([
-    decodeArcaFiscalData(decodePages),
+    decode(decodePages),
     Promise.all(pages.map((p) => prepareImage(p, PAGE_MIN_SIDE_PX))),
     cropBand(pages[0]!, HEADER_CROP),
     cropBand(pages[pages.length - 1]!, FOOTER_CROP),
@@ -211,24 +221,16 @@ export async function extractInvoiceV2(
     console.info(`[extraction-v2] código ARCA decodificado: ${decoded.source}${fiscal ? "" : " (a confirmar)"}`);
   }
   const itfCandidate = decoded && !fiscal ? decoded : null;
-  if (fiscal) {
-    content.push({
-      type: "text",
-      text: `Datos decodificados por software del ${fiscal.source === "QR" ? "QR" : "código de barras"} fiscal de ARCA de este comprobante (exactos, usalos como verdad): ${JSON.stringify(fiscal)}`,
-    });
-  } else if (itfCandidate) {
-    content.push({
-      type: "text",
-      text: `Se decodificó un código de barras del documento que podría ser el fiscal de ARCA: ${JSON.stringify(itfCandidate)}. Usalo solo si su CUIT es el del EMISOR que ves impreso.`,
-    });
-  }
+  // Lectura CIEGA: el modelo no recibe los datos del QR/ITF. Se aplican después; así su
+  // lectura de lo impreso sirve para contrastar el código (si se los pasáramos, los copiaría y
+  // el contraste nunca detectaría un QR de otro comprobante ni un ITF ajeno).
 
   const prompt = systemPrompt(opts);
   // Los datos del QR/ITF se aplican ANTES de validar: si el modelo erró un campo que el código
   // ya trae exacto, no hace falta una 2da pasada por eso.
   // Primera pasada en "low" (medido: más razonamiento no mejora la lectura y duplica la
   // latencia); OPENAI_REASONING_EFFORT la pisa si está definido.
-  const first = await extractInvoiceDataV2({
+  const first = await extract({
     systemPrompt: prompt,
     content,
     reasoningEffort: configuredReasoningEffort() ?? "low",
@@ -252,7 +254,7 @@ export async function extractInvoiceV2(
 
   if (issues.length > 0) {
     const hints = issues.map((i) => `- ${i.retryHint ?? i.reason}`).join("\n");
-    const retry = await extractInvoiceDataV2({
+    const retry = await extract({
       systemPrompt: prompt,
       content,
       reasoningEffort: "medium",
@@ -271,7 +273,10 @@ export async function extractInvoiceV2(
   let verifiedFields: VerifiedField[] = [];
   const extraIssues: ReviewIssue[] = [...qrMismatch];
   if (fiscal) {
-    verifiedFields = applyFiscalData(extracted, fiscal).verifiedFields;
+    // Lo que no coincide con lo impreso no se afirma como verificado (ni manda en el match de
+    // proveedor): queda aplicado del QR pero marcado para revisar.
+    const mismatched = new Set<string>(qrMismatch.map((i) => (i.field === "amounts" ? "total" : i.field)));
+    verifiedFields = applyFiscalData(extracted, fiscal).verifiedFields.filter((f) => !mismatched.has(f));
   } else if (opts.maestro.length > 0 && extracted.cuit) {
     const match = matchCuitAgainstMaestro(opts.maestro, extracted.cuit, extracted.provider);
     if (match.status === "corrected") {
@@ -286,6 +291,13 @@ export async function extractInvoiceV2(
   }
   if (!fiscal && !extracted.cuit && extracted.document_kind && extracted.document_kind !== "PRESUPUESTO") {
     extraIssues.push({ field: "cuit", reason: "No se encontró el CUIT del emisor en el comprobante." });
+  }
+  if (otherTaxesOf(extracted) > 0) {
+    extraIssues.push({
+      field: "extraction",
+      reason:
+        "Tiene otros tributos (impuestos internos, ITC u otros) que el JSON contable no incluye: revisá la imputación antes de enviarla al ERP.",
+    });
   }
   if (!fiscal && extracted.confidence < LOW_CONFIDENCE) {
     extraIssues.push({ field: "extraction", reason: "La IA informó baja confianza en esta lectura: revisá los datos." });

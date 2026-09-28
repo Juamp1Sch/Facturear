@@ -70,13 +70,7 @@ import {
 import { extractInvoiceV2 } from "@/lib/extraction-v2/pipeline";
 import type { MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import type { ExtractionReview } from "@/lib/extraction-v2/review";
-import { validateExtraction } from "@/lib/extraction-v2/validate";
-import {
-  excludeOtherTaxes,
-  lockQrTotal,
-  otherTaxesOf,
-  restoreOtherTaxes,
-} from "@/lib/extraction-v2/qr-total";
+import { amountsAsRead } from "@/lib/extraction-v2/amounts-as-read";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -433,20 +427,14 @@ async function applyExtractionToInvoice(
   const fiscalAuthType = doc.fiscalAuthType;
   const fiscalAuthCode = doc.fiscalAuthCode;
 
-  // El total del QR de ARCA es exacto: la reconciliación algebraica no puede pisarlo.
-  const qrTotal = options?.review?.verifiedFields?.includes("total")
-    ? extracted.total_amount
-    : null;
-  const otherTaxes = otherTaxesOf(extracted);
-  const finalized = lockQrTotal(
-    restoreOtherTaxes(
-      await finalizeExtractedAmounts(excludeOtherTaxes(extracted), visionImages, {
+  // v2: importes tal como se leyeron (con el QR aplicado). La reconciliación algebraica legacy
+  // despejaba percepciones para cerrar la suma y ocultaba desgloses mal leídos (ver
+  // amounts-as-read.ts); en v2 lo que no cierra queda marcado para revisar.
+  const finalized = options?.review
+    ? amountsAsRead(extracted)
+    : await finalizeExtractedAmounts(extracted, visionImages, {
         precomputedSupplement: amountsSupplement,
-      }),
-      otherTaxes,
-    ),
-    qrTotal,
-  );
+      });
   const { extracted: resolvedExtracted, debug: discountResolution } =
     enrichExtractedDiscounts(finalized.extracted, {
       rawOcrText,
@@ -470,22 +458,9 @@ async function applyExtractionToInvoice(
   }
   aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
   if (options?.review) {
-    // La marca de importes se recalcula sobre los importes FINALES (la reconciliación pudo
-    // corregirlos), con la validación estricta de v2 y no con la tolerancia del reconciliador.
-    const amountsIssue = validateExtraction(
-      {
-        ...resolvedExtracted,
-        net_amount: finalized.netAmount,
-        vat_amount: finalized.vatAmount,
-        perceptions_amount: finalized.perceptionsAmount,
-        total_amount: finalized.totalAmount,
-      },
-      qrTotal != null ? { total: qrTotal } : null,
-    ).find((issue) => issue.field === "amounts");
-    const reviewFields = { ...options.review.fields };
-    if (amountsIssue) reviewFields.amounts = amountsIssue.reason;
-    else delete reviewFields.amounts;
-    aiPayloadOut.review = { ...options.review, fields: reviewFields };
+    // Los importes no cambian después del pipeline v2: sus motivos (incluido QR vs. impreso)
+    // quedan tal cual.
+    aiPayloadOut.review = options.review;
   }
   if (finalized.amountsDiscrepancy != null) {
     aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
