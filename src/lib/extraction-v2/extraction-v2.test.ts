@@ -221,15 +221,16 @@ async function tinyPage(): Promise<Buffer> {
 const noMaestro = { maestroCuitHintsBlock: null, chartAccountHintsBlock: null, maestro: [] };
 type ExtractArgs = { content: unknown[]; followUp?: string };
 
-test("pipeline: QR de otro comprobante (CUIT distinto) no se aplica y queda todo marcado", async () => {
+test("pipeline: QR de otro comprobante (CUIT distinto y el número no lo confirma) no se aplica", async () => {
   const { extractInvoiceV2 } = await import("./pipeline");
   const calls: ExtractArgs[] = [];
   const qr = { source: "QR" as const, cuit: "30-50289158-4", total: 2000, pointOfSale: 6, number: 128741, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
+  const printed = { ...baseV2, invoice_number: null }; // el número impreso no se pudo leer
   const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
     decode: async () => qr,
     extract: async (args) => {
       calls.push(args as ExtractArgs);
-      return baseV2;
+      return printed;
     },
   });
   assert.equal(JSON.stringify(calls[0]!.content).includes("decodificad"), false, "lectura ciega");
@@ -341,4 +342,30 @@ test("pipeline: un reintento que rompe otro campo no se acepta", async () => {
   });
   assert.equal(n, 2);
   assert.equal(r.extracted.invoice_date, base.invoice_date, "se queda con la primera lectura");
+});
+
+test("pipeline: el modelo tomó el CUIT del cliente pero el número coincide → QR aplicado, CUIT marcado", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const qr = { source: "QR" as const, cuit: "30-50289158-4", total: base.total_amount!, pointOfSale: 6, number: 128741, comprobanteCode: 1, authType: "CAE" as const, authCode: "86041474598043" };
+  const r = await extractInvoiceV2([{ buffer: await tinyPage(), mimeType: "image/jpeg" }], noMaestro, {
+    decode: async () => qr,
+    extract: async () => ({ ...baseV2, invoice_number: "00006-00128741" }), // CUIT leído: 30-71178446-9
+  });
+  assert.equal(r.review.verifiedBy, "QR");
+  assert.equal(r.extracted.cuit, "30-50289158-4", "CUIT del QR aplicado");
+  assert.ok(r.review.fields.cuit, "pero marcado para revisar");
+  assert.equal(r.review.verifiedFields?.includes("cuit"), false);
+  assert.ok(r.review.verifiedFields?.includes("invoice_number"));
+});
+
+test("pipeline: un ITF con CUIT conocido del maestro pero distinto del impreso no se acepta", async () => {
+  const { extractInvoiceV2 } = await import("./pipeline");
+  const itf = { source: "ITF" as const, cuit: "30-50289158-4", authType: "CAE" as const, authCode: "11111111111111" };
+  const r = await extractInvoiceV2(
+    [{ buffer: await tinyPage(), mimeType: "image/jpeg" }],
+    { ...noMaestro, maestro: [{ cuit: "30-50289158-4", name: "Otro proveedor conocido" }] },
+    { decode: async () => itf, extract: async () => baseV2 },
+  );
+  assert.equal(r.review.verifiedBy, null);
+  assert.equal(r.extracted.fiscal_auth_code, base.fiscal_auth_code);
 });

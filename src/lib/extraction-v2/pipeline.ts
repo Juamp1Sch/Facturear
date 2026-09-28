@@ -171,6 +171,15 @@ export type ExtractionV2Deps = {
   decode: typeof decodeArcaFiscalData;
 };
 
+/** El número impreso (PV + número) coincide exactamente con el del QR. */
+export function qrNumberMatchesPrint(read: InvoiceExtractionV2Like, qr: ArcaFiscalData): boolean {
+  const printed = normalizeNumeroComprobanteFromAiOrNull(read.invoice_number);
+  const m = printed ? /^(\d+)-(\d+)$/.exec(printed) : null;
+  return Boolean(
+    m && qr.pointOfSale != null && qr.number != null && Number(m[1]) === qr.pointOfSale && Number(m[2]) === qr.number,
+  );
+}
+
 export async function extractInvoiceV2(
   parts: ExtractionPart[],
   opts: ExtractionV2Options,
@@ -228,17 +237,15 @@ export async function extractInvoiceV2(
   content.push(imagePart(headerCrop));
   content.push({ type: "text", text: `Ampliación del pie (página ${pages.length}):` });
   content.push(imagePart(footerCrop));
-  // El QR de ARCA (host validado) es verdad. Un ITF podría ser otro código impreso (p. ej. de
-  // cobro): es verdad solo si su CUIT ya está en el maestro; si no, evidencia a confirmar.
-  const maestroHas = (cuit: string) =>
-    opts.maestro.some((m) => m.cuit.replace(/\D/g, "") === cuit.replace(/\D/g, ""));
-  let fiscal: ArcaFiscalData | null =
-    decoded && (decoded.source === "QR" || maestroHas(decoded.cuit)) ? decoded : null;
+  // QR (host de ARCA validado) e ITF se usan recién después de contrastarlos con lo impreso: un
+  // ITF puede ser otro código del papel (cupón de pago, incluso de un proveedor conocido) y un QR
+  // puede estar mal generado o ser de otro comprobante.
+  let fiscal: ArcaFiscalData | null = decoded && decoded.source === "QR" ? decoded : null;
+  const itfCandidate = decoded && decoded.source === "ITF" ? decoded : null;
   if (decoded) {
     // Permite confirmar en los logs de Vercel que el lector de códigos funciona en producción.
-    console.info(`[extraction-v2] código ARCA decodificado: ${decoded.source}${fiscal ? "" : " (a confirmar)"}`);
+    console.info(`[extraction-v2] código ARCA decodificado: ${decoded.source}`);
   }
-  const itfCandidate = decoded && !fiscal ? decoded : null;
   // Lectura CIEGA: el modelo no recibe los datos del QR/ITF. Se aplican después; así su
   // lectura de lo impreso sirve para contrastar el código (si se los pasáramos, los copiaría y
   // el contraste nunca detectaría un QR de otro comprobante ni un ITF ajeno).
@@ -266,9 +273,14 @@ export async function extractInvoiceV2(
   // comprobante) puede traer datos que no coinciden con lo impreso. Se contrasta con la
   // primera lectura del modelo y, si difiere claramente, se marca para revisar.
   const qrMismatch = fiscal?.source === "QR" ? compareQrWithPrintedReading(first, fiscal) : [];
-  // CUIT o número muy distintos a lo impreso: el QR es de otro comprobante y no se aplica
-  // (queda todo marcado para revisar). Si solo difiere el total, se aplica pero sin afirmarlo.
-  if (qrMismatch.some((i) => i.field === "cuit" || i.field === "invoice_number")) {
+  // ¿Es el QR de OTRO comprobante? Sí si el número impreso difiere, o si difiere el CUIT y el
+  // número no alcanza para confirmarlo. Si el número coincide, el QR es de esta factura aunque el
+  // modelo haya tomado otro CUIT (p. ej. el del cliente): se aplica y solo queda marcado el CUIT.
+  // Si solo difiere el total, se aplica pero sin afirmar el total.
+  const numberMismatch = qrMismatch.some((i) => i.field === "invoice_number");
+  const cuitMismatch = qrMismatch.some((i) => i.field === "cuit");
+  const numberConfirms = fiscal ? qrNumberMatchesPrint(first, fiscal) : false;
+  if (numberMismatch || (cuitMismatch && !numberConfirms)) {
     fiscal = null;
   }
   const withFiscal = (e: InvoiceExtractionV2) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
@@ -337,7 +349,9 @@ export async function extractInvoiceV2(
   }
 
   const fields: Partial<Record<ReviewFieldKey, string>> = {};
-  for (const issue of [...validateExtraction(extracted, fiscal), ...extraIssues]) {
+  // Los motivos del cruce QR vs. impreso (en extraIssues) son los más útiles: van primero.
+  const totalVerified = verifiedFields.includes("total");
+  for (const issue of [...extraIssues, ...validateExtraction(extracted, totalVerified ? fiscal : null)]) {
     fields[issue.field] ??= issue.reason;
   }
 
