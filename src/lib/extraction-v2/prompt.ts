@@ -82,6 +82,6 @@ Importes (del recuadro de totales)
 
 Verificá tu lectura antes de responder (hacelo internamente)
 1. net_amount + vat_amount + perceptions_amount + other_taxes_amount = total_amount (tolerancia de centavos). Si no cierra, releé los dígitos dudosos hasta que cierre.
-2. El CUIT tiene dígito verificador: con pesos 5,4,3,2,7,6,5,4,3,2 sobre los 10 primeros dígitos, v = 11 - (suma mod 11); si v = 11 el verificador es 0. Si tu lectura no verifica, releé ese dígito por dígito.
+2. El CUIT tiene dígito verificador: con pesos 5,4,3,2,7,6,5,4,3,2 sobre los 10 primeros dígitos, v = 11 - (suma mod 11); si v = 11 el verificador es 0 y si v = 10 es 9. Si tu lectura no verifica, releé ese dígito por dígito.
 3. En comprobantes electrónicos el código de barras (o su número impreso debajo) contiene: CUIT del emisor (11) + código de comprobante + punto de venta + CAE (14) + vencimiento del CAE (AAAAMMDD) + dígito verificador. Usalo para confirmar CUIT, punto de venta y CAE.
 4. El vencimiento del CAE suele ser la fecha de emisión + 10 días: sirve para desambiguar una fecha tachada o borrosa.`;

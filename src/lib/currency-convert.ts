@@ -10,6 +10,7 @@ const SCALAR_AMOUNT_KEYS = [
   "perceptions_amount",
   "total_amount",
   "discount_amount",
+  "other_taxes_amount",
 ] as const;
 
 /** Arrays de renglones con `.amount` que se escalan al convertir. */

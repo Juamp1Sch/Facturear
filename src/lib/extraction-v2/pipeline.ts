@@ -355,9 +355,10 @@ export async function extractInvoiceV2(
       followUp: `Tu extracción anterior:\n${JSON.stringify(read)}\n\nNo pasó estas validaciones:\n${hints}\n\nRevisá esas zonas del documento con máximo cuidado y devolvé la extracción completa corregida. Si el valor realmente es así en el documento, mantenelo.`,
     });
     const retryIssues = readIssuesOf(retry);
-    // Se acepta solo si no aparecen problemas en campos que antes estaban bien.
+    // Se acepta solo si resuelve algo y no aparecen problemas en campos que antes estaban bien;
+    // si empata, queda la primera lectura.
     const before = new Set<string>(readIssues.map((i) => i.field));
-    if (retryIssues.length <= readIssues.length && retryIssues.every((i) => before.has(i.field))) {
+    if (retryIssues.length < readIssues.length && retryIssues.every((i) => before.has(i.field))) {
       read = retry;
       readIssues = retryIssues;
     }

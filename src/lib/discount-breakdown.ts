@@ -227,8 +227,11 @@ function amountsReconcileWithoutDiscount(extracted: InvoiceExtraction): boolean 
   const net = extracted.net_amount;
   const total = extracted.total_amount;
   if (net == null || total == null) return false;
+  // Otros tributos (impuestos internos, ITC) de la extracción v2 también suman al total: sin
+  // ellos, un comprobante de combustible "no cerraría" y dispararía la pasada de bonificaciones.
+  const otherTaxes = (extracted as { other_taxes_amount?: number | null }).other_taxes_amount ?? 0;
   const sum = roundMoney(
-    net + (extracted.vat_amount ?? 0) + (extracted.perceptions_amount ?? 0),
+    net + (extracted.vat_amount ?? 0) + (extracted.perceptions_amount ?? 0) + otherTaxes,
   );
   return Math.abs(sum - total) <= 0.05;
 }

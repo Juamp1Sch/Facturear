@@ -395,6 +395,20 @@ async function applyExtractionToInvoice(
   );
   const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
   const providerCuit = cuitIsVerified ? (aiCuit ?? resolved?.cuit ?? null) : (resolved?.cuit ?? aiCuit);
+  // Si el match por nombre terminó usando otro CUIT que el leído, el motivo de "Revisar" tiene que
+  // hablar del CUIT que se guarda (la marca se mantiene: el match por nombre no es verificación).
+  const review =
+    options?.review && providerCuit && providerCuit !== aiCuit
+      ? {
+          ...options.review,
+          fields: {
+            ...options.review.fields,
+            cuit: aiCuit
+              ? `Se usó el CUIT ${providerCuit} de tu maestro (proveedor encontrado por nombre); el leído era ${aiCuit}: confirmalo.`
+              : `No se leyó el CUIT: se usó ${providerCuit} de tu maestro (proveedor encontrado por nombre): confirmalo.`,
+          },
+        }
+      : options?.review;
   const supplierCode = resolved?.code ?? null;
 
   let empresaOut = prior?.empresa ?? null;
@@ -454,7 +468,7 @@ async function applyExtractionToInvoice(
   if (options?.review) {
     // Los importes no cambian después del pipeline v2: sus motivos (incluido QR vs. impreso)
     // quedan tal cual.
-    aiPayloadOut.review = options.review;
+    aiPayloadOut.review = review;
   }
   if (finalized.amountsDiscrepancy != null) {
     aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;

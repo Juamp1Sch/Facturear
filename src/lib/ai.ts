@@ -454,7 +454,7 @@ export async function supplementDiscountFromImages(
 /**
  * Tope por llamada: el default del SDK es 10 min, y una llamada colgada (medido: pasa) dejaba la
  * factura esperando ~10 min antes del reintento. Una lectura normal tarda 5-40 s; el SDK
- * reintenta solo al vencer el tope.
+ * reintenta una sola vez al vencer el tope (peor caso ~4 min por llamada, no ~30).
  */
 const V2_REQUEST_TIMEOUT_MS = 120_000;
 
@@ -484,7 +484,7 @@ export async function extractInvoiceDataV2(params: {
         messages,
         response_format: zodResponseFormat(invoiceExtractionSchemaV2, "invoice_extraction"),
       },
-      { timeout: V2_REQUEST_TIMEOUT_MS },
+      { timeout: V2_REQUEST_TIMEOUT_MS, maxRetries: 1 },
     ),
   );
   logUsage(params.pass, completion);
