@@ -36,14 +36,18 @@ function nameTokens(s: string): Set<string> {
   );
 }
 
-/** Proporción de palabras significativas compartidas (sobre el nombre más corto). */
+/**
+ * Proporción de palabras significativas compartidas sobre el nombre MÁS LARGO: un nombre
+ * genérico de una sola palabra ("ELECTRICIDAD SRL") no alcanza para igualar a otro más
+ * específico ("ELECTRICIDAD NORTE SA" da 0,5), y así no habilita reemplazar dígitos del CUIT.
+ */
 export function supplierNameSimilarity(a: string, b: string): number {
   const A = nameTokens(a);
   const B = nameTokens(b);
   if (A.size === 0 || B.size === 0) return 0;
   let shared = 0;
   for (const t of A) if (B.has(t)) shared++;
-  return shared / Math.min(A.size, B.size);
+  return shared / Math.max(A.size, B.size);
 }
 
 /** Distancia de edición entre dos cadenas de dígitos (cambios, faltantes o sobrantes). */

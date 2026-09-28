@@ -1,7 +1,12 @@
 import type OpenAI from "openai";
 import sharp from "sharp";
 
-import { extractInvoiceDataV2, imageDetailForCurrentModel } from "@/lib/ai";
+import {
+  configuredReasoningEffort,
+  currentOpenAIModel,
+  extractInvoiceDataV2,
+  imageDetailForCurrentModel,
+} from "@/lib/ai";
 import {
   documentKindForComprobanteCode,
   letterForComprobanteCode,
@@ -170,6 +175,11 @@ export async function extractInvoiceV2(
     }
   }
   if (pages.length === 0) throw new Error("No hay páginas para procesar.");
+  if (imageDetailForCurrentModel() !== "original") {
+    console.warn(
+      `[extraction-v2] corriendo sobre ${currentOpenAIModel()}: el pipeline v2 se midió con gpt-6-luna. Revisá OPENAI_MODEL.`,
+    );
+  }
 
   const [decoded, preparedPages, headerCrop, footerCrop] = await Promise.all([
     decodeArcaFiscalData(decodePages),
@@ -197,6 +207,10 @@ export async function extractInvoiceV2(
     opts.maestro.some((m) => m.cuit.replace(/\D/g, "") === cuit.replace(/\D/g, ""));
   let fiscal: ArcaFiscalData | null =
     decoded && (decoded.source === "QR" || maestroHas(decoded.cuit)) ? decoded : null;
+  if (decoded) {
+    // Permite confirmar en los logs de Vercel que el lector de códigos funciona en producción.
+    console.info(`[extraction-v2] código ARCA decodificado: ${decoded.source}${fiscal ? "" : " (a confirmar)"}`);
+  }
   const itfCandidate = decoded && !fiscal ? decoded : null;
   if (fiscal) {
     content.push({
@@ -213,7 +227,14 @@ export async function extractInvoiceV2(
   const prompt = systemPrompt(opts);
   // Los datos del QR/ITF se aplican ANTES de validar: si el modelo erró un campo que el código
   // ya trae exacto, no hace falta una 2da pasada por eso.
-  const first = await extractInvoiceDataV2({ systemPrompt: prompt, content, reasoningEffort: "low", pass: "v2" });
+  // Primera pasada en "low" (medido: más razonamiento no mejora la lectura y duplica la
+  // latencia); OPENAI_REASONING_EFFORT la pisa si está definido.
+  const first = await extractInvoiceDataV2({
+    systemPrompt: prompt,
+    content,
+    reasoningEffort: configuredReasoningEffort() ?? "low",
+    pass: "v2",
+  });
   // El ITF no confirmado se acepta si el CUIT que leyó el modelo en el membrete es el mismo o
   // casi (1-2 dígitos): así se descartan códigos de barras que no son del comprobante.
   if (itfCandidate) {

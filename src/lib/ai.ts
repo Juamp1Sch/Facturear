@@ -114,7 +114,19 @@ function modelParams(effort?: ReasoningEffort): {
  * no reduce la imagen (recomendado por OpenAI para OCR); gpt-4o solo acepta hasta "high".
  */
 export function imageDetailForCurrentModel(): "original" | "high" {
-  return isReasoningModel(getOpenAIModel()) ? "original" : "high";
+  // Solo donde se probó (GPT-5.x/6); la serie o* y gpt-4o van con "high".
+  return /^(gpt-5|gpt-6)/i.test(getOpenAIModel()) ? "original" : "high";
+}
+
+/** Nombre del modelo configurado (para logs/diagnóstico del pipeline). */
+export function currentOpenAIModel(): string {
+  return getOpenAIModel();
+}
+
+/** OPENAI_REASONING_EFFORT si está definido explícitamente (null = usar el default del caller). */
+export function configuredReasoningEffort(): ReasoningEffort | null {
+  const raw = process.env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
+  return raw === "low" || raw === "medium" || raw === "high" ? raw : null;
 }
 
 /** Deja en los logs el consumo real de tokens por pasada (para medir costo por factura). */

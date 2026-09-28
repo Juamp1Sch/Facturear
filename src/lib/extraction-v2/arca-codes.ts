@@ -64,7 +64,11 @@ export function parseArcaQrText(text: string): ArcaFiscalData | null {
       : /^\d{4}-\d{2}-\d{2}$/.test(fecha)
         ? fecha
         : undefined;
-    const num = (v: unknown) => (v == null || v === "" || Number.isNaN(Number(v)) ? undefined : Number(v));
+    const num = (v: unknown) => {
+      if (typeof v !== "number" && typeof v !== "string") return undefined;
+      const n = Number(v);
+      return v === "" || !Number.isFinite(n) ? undefined : n; // descarta NaN e Infinity ("1e999")
+    };
     return {
       source: "QR",
       cuit,

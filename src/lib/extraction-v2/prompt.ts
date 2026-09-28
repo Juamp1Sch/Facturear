@@ -32,6 +32,12 @@ export const invoiceExtractionSchemaV2 = invoiceExtractionSchema.extend({
     .array(taxBreakdownLineSchema)
     .nullable()
     .describe("Bonificaciones o descuentos GLOBALES del pie con importe (en positivo). null si no hay."),
+  other_taxes_amount: z
+    .number()
+    .nullable()
+    .describe(
+      "Otros tributos del recuadro de totales que no son IVA ni percepciones (impuestos internos, ITC, tasas). null si no hay.",
+    ),
   exchange_rate: z
     .number()
     .nullable()
@@ -59,6 +65,7 @@ Número, fecha, letra y autorización
 
 Importes (del recuadro de totales)
 - net_amount = neto gravado / subtotal sin IVA; vat_amount = total de IVA (vat_lines por alícuota); perceptions_amount = total de percepciones (perception_lines, kind IVA o IIBB según el concepto del renglón, aunque esté dentro de un bloque titulado de otra forma); total_amount = importe final.
+- other_taxes_amount = otros tributos que no son IVA ni percepciones (impuestos internos, ITC, tasas, "Otros tributos"); forman parte del total.
 - Algunos comprobantes rotulan el total final como "TOTAL NETO": es el total si coincide con la suma.
 - Si el comprobante no discrimina IVA (B o C sin desglose), devolvé total_amount y dejá net_amount y vat_amount en null. Si informa "IVA contenido", usalo.
 - discount_lines: solo bonificaciones o descuentos GLOBALES del pie con importe (en positivo), no los descuentos por renglón ya incluidos en el subtotal.
@@ -66,7 +73,7 @@ Importes (del recuadro de totales)
 - Si el recuadro de totales no está en las imágenes (por ejemplo, falta la última hoja), los importes van null.
 
 Verificá tu lectura antes de responder (hacelo internamente)
-1. net_amount + vat_amount + perceptions_amount = total_amount (tolerancia de centavos). Si no cierra, releé los dígitos dudosos hasta que cierre.
+1. net_amount + vat_amount + perceptions_amount + other_taxes_amount = total_amount (tolerancia de centavos). Si no cierra, releé los dígitos dudosos hasta que cierre.
 2. El CUIT tiene dígito verificador: con pesos 5,4,3,2,7,6,5,4,3,2 sobre los 10 primeros dígitos, v = 11 - (suma mod 11); si v = 11 el verificador es 0. Si tu lectura no verifica, releé ese dígito por dígito.
 3. En comprobantes electrónicos el código de barras (o su número impreso debajo) contiene: CUIT del emisor (11) + código de comprobante + punto de venta + CAE (14) + vencimiento del CAE (AAAAMMDD) + dígito verificador. Usalo para confirmar CUIT, punto de venta y CAE.
 4. El vencimiento del CAE suele ser la fecha de emisión + 10 días: sirve para desambiguar una fecha tachada o borrosa.

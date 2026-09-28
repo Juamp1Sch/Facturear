@@ -116,9 +116,14 @@ test("validación: CUIT, suma, CAE, fecha y total del QR", () => {
   assert.deepEqual(fields({ total_amount: 1544.72 }), ["amounts"]);
   assert.deepEqual(fields({ fiscal_auth_code: "8604147459804" }), ["fiscal_auth"]);
   assert.deepEqual(fields({ invoice_date: "2026-09-18" }), ["invoice_date"]);
+  // Con QR, el motivo aclara que el total es el exacto del QR y lo que no cierra es el desglose.
+  const withQr = validateExtraction({ ...base, total_amount: 1600 }, { total: 1600 }, now);
+  assert.equal(withQr[0]?.field, "amounts");
+  assert.match(withQr[0]!.reason, /QR de ARCA/);
+  // Otros tributos (impuestos internos) suman al total: no se marca.
   assert.deepEqual(
-    fields({}, { total: 1600 }),
-    ["amounts"],
+    validateExtraction({ ...base, total_amount: 1646.72, other_taxes_amount: 100 } as InvoiceExtraction, null, now),
+    [],
   );
 });
 
@@ -186,4 +191,15 @@ test("match de proveedor: con CUIT verificado gana el CUIT sobre el nombre", asy
   assert.equal(matchSupplierFromList(suppliers, "CORESA S.A.", "30-71178446-9", { cuitIsVerified: true })?.code, "1");
   // Verificado y sin match por CUIT: no se toma un proveedor por nombre con OTRO CUIT.
   assert.equal(matchSupplierFromList(suppliers, "CORESA S.A.", "30-00000000-7", { cuitIsVerified: true }), null);
+});
+
+test("QR: importe no finito se descarta", () => {
+  const r = parseArcaQrText(qrUrl({ cuit: 30000000007, codAut: 70417054367476, importe: "1e999", ptoVta: true }));
+  assert.equal(r?.total, undefined);
+  assert.equal(r?.pointOfSale, undefined);
+});
+
+test("maestro: un nombre genérico de una palabra no iguala a uno más específico", () => {
+  assert.equal(supplierNameSimilarity("ELECTRICIDAD SRL", "ELECTRICIDAD NORTE SA"), 0.5);
+  assert.equal(supplierNameSimilarity("JELUZ S.A.C.I.F.I. Y A.", "JELUZ S A C I F I Y A"), 1);
 });

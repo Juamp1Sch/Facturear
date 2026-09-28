@@ -21,8 +21,11 @@ const CAE_DIGITS = 14;
 const MAX_FUTURE_DAYS = 2;
 
 export function validateExtraction(
-  e: InvoiceExtraction,
-  /** Solo se usa el total (del QR de ARCA, exacto). */
+  e: InvoiceExtraction & { other_taxes_amount?: number | null },
+  /**
+   * Solo se usa para el texto del motivo: los datos del QR ya se aplicaron sobre `e` antes de
+   * validar (el total leído por el modelo nunca queda en conflicto con el del QR).
+   */
   fiscal: Pick<ArcaFiscalData, "total"> | null,
   now: Date = new Date(),
 ): ReviewIssue[] {
@@ -37,7 +40,10 @@ export function validateExtraction(
   }
 
   if (e.net_amount != null && e.total_amount != null) {
-    const sum = e.net_amount + (e.vat_amount ?? 0) + (e.perceptions_amount ?? 0);
+    // Otros tributos (impuestos internos, ITC) también suman al total: sin ellos, comprobantes
+    // de combustibles o telecomunicaciones quedarían marcados aunque estén bien leídos.
+    const sum =
+      e.net_amount + (e.vat_amount ?? 0) + (e.perceptions_amount ?? 0) + (e.other_taxes_amount ?? 0);
     if (Math.abs(sum - e.total_amount) > TOLERANCE) {
       issues.push({
         field: "amounts",
@@ -49,14 +55,6 @@ export function validateExtraction(
       });
     }
   }
-  if (fiscal?.total != null && e.total_amount != null && Math.abs(fiscal.total - e.total_amount) > TOLERANCE) {
-    issues.push({
-      field: "amounts",
-      reason: `El total leído (${e.total_amount.toFixed(2)}) no coincide con el del QR de ARCA (${fiscal.total.toFixed(2)}).`,
-      retryHint: `El total leído (${e.total_amount}) no coincide con el importe del QR fiscal (${fiscal.total}). Releé el recuadro de totales.`,
-    });
-  }
-
   const authDigits = (e.fiscal_auth_code ?? "").replace(/\D/g, "");
   if ((e.fiscal_auth_type === "CAE" || e.fiscal_auth_type === "CAEA") && authDigits && authDigits.length !== CAE_DIGITS) {
     issues.push({

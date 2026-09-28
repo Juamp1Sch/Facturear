@@ -111,11 +111,6 @@ export type MaestroSupplierRow = {
   cuit: string | null;
 };
 
-/**
- * Misma regla que al procesar la factura: CUIT igual al leído, o nombre del maestro como prefijo
- * del emisor en la factura. Si CUIT y nombre apuntan a distintos códigos, prevalece el match por nombre.
- * Para documentos sin CUIT (presupuestos) cae a un match tolerante a abreviaturas.
- */
 export type SupplierMatchOptions = {
   /**
    * El CUIT es exacto (QR/código de barras de ARCA o corregido con el maestro): gana sobre el
@@ -124,6 +119,12 @@ export type SupplierMatchOptions = {
   cuitIsVerified?: boolean;
 };
 
+/**
+ * Misma regla que al procesar la factura: CUIT igual al leído, o nombre del maestro como prefijo
+ * del emisor en la factura. Si CUIT y nombre apuntan a distintos códigos, prevalece el match por
+ * nombre (CUIT de OCR), salvo con `cuitIsVerified`, donde manda el CUIT.
+ * Para documentos sin CUIT (presupuestos) cae a un match tolerante a abreviaturas.
+ */
 export function matchSupplierFromList(
   suppliers: ReadonlyArray<MaestroSupplierRow>,
   invoiceProviderName: string | null | undefined,
