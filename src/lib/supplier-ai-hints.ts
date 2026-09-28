@@ -41,6 +41,7 @@ export async function loadSupplierMaestroForCuitMatch(
   const rows = await prisma.supplier.findMany({
     where: { userId, cuit: { not: null } },
     select: { name: true, cuit: true },
+    orderBy: { name: "asc" },
     take: MAESTRO_MATCH_MAX_ROWS,
   });
   return rows.filter((r): r is { name: string; cuit: string } => Boolean(r.cuit));

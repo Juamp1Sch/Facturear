@@ -6,7 +6,7 @@ import { letterForComprobanteCode, type ArcaFiscalData } from "@/lib/extraction-
 import { decodeArcaFiscalData } from "@/lib/extraction-v2/decode-arca";
 import { matchCuitAgainstMaestro, type MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
-import type { ExtractionReview, ReviewFieldKey } from "@/lib/extraction-v2/review";
+import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -102,20 +102,35 @@ function systemPrompt(opts: ExtractionV2Options): string {
   return blocks.length ? `${EXTRACTION_SYSTEM_PROMPT_V2}\n\n---\n${blocks.join("\n\n---\n")}` : EXTRACTION_SYSTEM_PROMPT_V2;
 }
 
-function applyFiscalData(e: InvoiceExtraction, fiscal: ArcaFiscalData): InvoiceExtraction {
+/** Pisa la lectura del modelo con los datos exactos del código y devuelve qué campos aplicó. */
+export function applyFiscalData(
+  e: InvoiceExtraction,
+  fiscal: ArcaFiscalData,
+): { extracted: InvoiceExtraction; verifiedFields: VerifiedField[] } {
   const out = { ...e, cuit: fiscal.cuit, fiscal_auth_type: fiscal.authType, fiscal_auth_code: fiscal.authCode };
-  if (fiscal.date) out.invoice_date = fiscal.date;
+  const verifiedFields: VerifiedField[] = ["cuit", "fiscal_auth"];
+  if (fiscal.date) {
+    out.invoice_date = fiscal.date;
+    verifiedFields.push("invoice_date");
+  }
   if (fiscal.pointOfSale != null && fiscal.number != null) {
     out.invoice_number = `${String(fiscal.pointOfSale).padStart(5, "0")}-${String(fiscal.number).padStart(8, "0")}`;
+    verifiedFields.push("invoice_number");
   }
   const letter = letterForComprobanteCode(fiscal.comprobanteCode);
-  if (letter) out.invoice_type = letter;
+  if (letter) {
+    out.invoice_type = letter;
+    verifiedFields.push("invoice_type");
+  }
   if (fiscal.comprobanteCode != null) out.afip_comprobante_code = String(fiscal.comprobanteCode).padStart(2, "0");
-  if (fiscal.total != null) out.total_amount = fiscal.total;
+  if (fiscal.total != null) {
+    out.total_amount = fiscal.total;
+    verifiedFields.push("total");
+  }
   if (fiscal.currency === "DOL" && fiscal.exchangeRate != null && fiscal.exchangeRate > 1) {
     out.exchange_rate = fiscal.exchangeRate;
   }
-  return out;
+  return { extracted: out, verifiedFields };
 }
 
 export async function extractInvoiceV2(
@@ -191,9 +206,10 @@ export async function extractInvoiceV2(
   }
 
   let cuitCorrection: ExtractionReview["cuitCorrection"];
+  let verifiedFields: VerifiedField[] = [];
   const extraIssues: ReviewIssue[] = [];
   if (fiscal) {
-    extracted = applyFiscalData(extracted, fiscal);
+    ({ extracted, verifiedFields } = applyFiscalData(extracted, fiscal));
   } else if (opts.maestro.length > 0 && extracted.cuit) {
     const match = matchCuitAgainstMaestro(opts.maestro, extracted.cuit, extracted.provider);
     if (match.status === "corrected") {
@@ -222,6 +238,6 @@ export async function extractInvoiceV2(
     extracted,
     rawOcrText: rawText ?? `[${parts.length} parte(s): campos inferidos por visión.]`,
     visionImages,
-    review: { version: 2, fields, verifiedBy: fiscal?.source ?? null, cuitCorrection },
+    review: { version: 2, fields, verifiedBy: fiscal?.source ?? null, verifiedFields, cuitCorrection },
   };
 }

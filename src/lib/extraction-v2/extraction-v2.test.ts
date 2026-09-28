@@ -93,3 +93,18 @@ test("validación: CUIT, suma, CAE, fecha y total del QR", () => {
     ["amounts"],
   );
 });
+
+test("applyFiscalData: el ITF solo verifica CUIT y CAE; el QR verifica todo lo que trae", async () => {
+  const { applyFiscalData } = await import("./pipeline");
+  const itf = applyFiscalData(base, { source: "ITF", cuit: "30-00000000-7", authType: "CAE", authCode: "66213396734316" });
+  assert.deepEqual(itf.verifiedFields, ["cuit", "fiscal_auth"]);
+  assert.equal(itf.extracted.invoice_date, base.invoice_date);
+  assert.equal(itf.extracted.total_amount, base.total_amount);
+  const qr = applyFiscalData(base, {
+    source: "QR", cuit: "30-00000000-7", date: "2020-10-13", pointOfSale: 10, number: 94, comprobanteCode: 1,
+    total: 12100, currency: "PES", exchangeRate: 1, authType: "CAE", authCode: "70417054367476",
+  });
+  assert.deepEqual(qr.verifiedFields, ["cuit", "fiscal_auth", "invoice_date", "invoice_number", "invoice_type", "total"]);
+  assert.equal(qr.extracted.invoice_number, "00010-00000094");
+  assert.equal(qr.extracted.total_amount, 12100);
+});

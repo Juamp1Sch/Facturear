@@ -14,20 +14,26 @@ let ready: Promise<void> | null = null;
 
 /** Carga el .wasm desde node_modules (sin descargarlo de un CDN en runtime). */
 function ensureZXing(): Promise<void> {
-  ready ??= (async () => {
-    const wasmPath = path.join(
-      process.cwd(),
-      "node_modules",
-      "zxing-wasm",
-      "dist",
-      "reader",
-      "zxing_reader.wasm",
-    );
-    const bin = await readFile(wasmPath);
-    const wasmBinary = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer;
-    await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
-  })();
+  ready ??= loadZXing().catch((err: unknown) => {
+    // No cachear el fallo: en serverless la instancia sigue viva y el próximo intento puede andar.
+    ready = null;
+    throw err;
+  });
   return ready;
+}
+
+async function loadZXing(): Promise<void> {
+  const wasmPath = path.join(
+    process.cwd(),
+    "node_modules",
+    "zxing-wasm",
+    "dist",
+    "reader",
+    "zxing_reader.wasm",
+  );
+  const bin = await readFile(wasmPath);
+  const wasmBinary = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer;
+  await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
 }
 
 async function decodeOnce(image: Buffer): Promise<ArcaFiscalData | null> {

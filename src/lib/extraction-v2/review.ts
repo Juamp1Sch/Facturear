@@ -9,12 +9,35 @@ export type ReviewFieldKey =
   | "fiscal_auth"
   | "extraction";
 
+/** Campos tomados del QR / código de barras de ARCA (exactos, no del OCR del modelo). */
+export type VerifiedField =
+  | "cuit"
+  | "invoice_date"
+  | "invoice_number"
+  | "invoice_type"
+  | "total"
+  | "fiscal_auth";
+
+const VERIFIED_FIELDS: readonly VerifiedField[] = [
+  "cuit",
+  "invoice_date",
+  "invoice_number",
+  "invoice_type",
+  "total",
+  "fiscal_auth",
+];
+
 export type ExtractionReview = {
   version: 2;
   /** Campo → motivo por el que conviene revisarlo. */
   fields: Partial<Record<ReviewFieldKey, string>>;
   /** Si CUIT/fecha/número/total/CAE salieron del QR o código de barras de ARCA (exactos). */
   verifiedBy: "QR" | "ITF" | null;
+  /**
+   * Qué campos salieron de verdad del código (el ITF solo trae CUIT y CAE; el QR, casi todo).
+   * La UI solo afirma como verificados estos.
+   */
+  verifiedFields?: VerifiedField[];
   /** CUIT corregido contra el maestro de proveedores. */
   cuitCorrection?: { from: string | null; to: string; supplierName: string };
 };
@@ -29,6 +52,9 @@ export function readExtractionReview(aiPayload: unknown): ExtractionReview | nul
     version: 2,
     fields: r.fields,
     verifiedBy: r.verifiedBy === "QR" || r.verifiedBy === "ITF" ? r.verifiedBy : null,
+    verifiedFields: Array.isArray(r.verifiedFields)
+      ? r.verifiedFields.filter((f): f is VerifiedField => VERIFIED_FIELDS.includes(f))
+      : [],
     cuitCorrection: r.cuitCorrection,
   };
 }

@@ -34,7 +34,7 @@ import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
-import { readExtractionReview } from "@/lib/extraction-v2/review";
+import { readExtractionReview, type VerifiedField } from "@/lib/extraction-v2/review";
 import { ReviewBadge } from "@/components/review-badge";
 import type { DocumentKind } from "@/lib/comprobante-code";
 import { parseDiscountFromPayload, parseTaxBreakdownFromPayload, needsPerceptionBreakdownWarning } from "@/lib/tax-breakdown";
@@ -405,6 +405,7 @@ export function InvoiceExtractedFields({
   const extractionReview =
     invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
   const reviewFields = extractionReview?.fields ?? {};
+  const verifiedFieldsLabel = formatVerifiedFields(extractionReview?.verifiedFields ?? []);
   const generalReviewReasons = [reviewFields.fiscal_auth, reviewFields.extraction].filter(
     (r): r is string => Boolean(r),
   );
@@ -478,9 +479,9 @@ export function InvoiceExtractedFields({
           </div>
         ) : null}
 
-        {extractionReview?.verifiedBy ? (
+        {extractionReview?.verifiedBy && verifiedFieldsLabel ? (
           <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-            CUIT, fecha, número, total y CAE verificados con el{" "}
+            {verifiedFieldsLabel} verificados con el{" "}
             {extractionReview.verifiedBy === "QR" ? "QR" : "código de barras"} de ARCA del
             comprobante.
           </div>
@@ -503,7 +504,8 @@ export function InvoiceExtractedFields({
           </div>
         ) : null}
 
-        {amountsReview.needsReview ? (
+        {/* Con extracción v2 la marca de importes es la estricta de review (badge en Total). */}
+        {amountsReview.needsReview && !extractionReview ? (
           <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
             Revisar importes: la suma neto + IVA + percepciones no coincide con el
             total
@@ -1192,4 +1194,21 @@ export function InvoiceExtractedFields({
       </CardContent>
     </Card>
   );
+}
+
+const VERIFIED_FIELD_LABELS: Record<VerifiedField, string> = {
+  cuit: "CUIT",
+  invoice_date: "fecha",
+  invoice_number: "número",
+  invoice_type: "letra",
+  total: "total",
+  fiscal_auth: "CAE",
+};
+
+/** "CUIT, fecha, número y CAE" según lo que realmente vino del QR / código de barras. */
+function formatVerifiedFields(fields: VerifiedField[]): string | null {
+  const labels = fields.map((f) => VERIFIED_FIELD_LABELS[f]);
+  if (labels.length === 0) return null;
+  const text = labels.length === 1 ? labels[0]! : `${labels.slice(0, -1).join(", ")} y ${labels.at(-1)}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
