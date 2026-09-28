@@ -1,5 +1,31 @@
 import { reconcileAmounts } from "@/lib/amount-reconcile";
 import type { FinalizedAmounts } from "@/lib/extraction-amounts";
+import type { InvoiceExtraction } from "@/lib/schemas";
+
+type WithOtherTaxes = InvoiceExtraction & { other_taxes_amount?: number | null };
+
+/** Otros tributos (impuestos internos, ITC) leídos por v2; 0 si no hay. */
+export function otherTaxesOf(e: InvoiceExtraction): number {
+  const v = (e as WithOtherTaxes).other_taxes_amount;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/**
+ * La reconciliación (finalizeExtractedAmounts) no conoce los otros tributos: con el total
+ * completo "cerraría" la suma metiéndolos en percepciones (que se exportan como PIV/PIB).
+ * Se reconcilia sobre el total SIN otros tributos y después se suman de vuelta.
+ */
+export function excludeOtherTaxes(e: InvoiceExtraction): InvoiceExtraction {
+  const other = otherTaxesOf(e);
+  if (!other || e.total_amount == null) return e;
+  return { ...e, total_amount: Math.round((e.total_amount - other) * 100) / 100 };
+}
+
+export function restoreOtherTaxes(finalized: FinalizedAmounts, other: number): FinalizedAmounts {
+  if (!other || finalized.totalAmount == null) return finalized;
+  const total = Math.round((finalized.totalAmount + other) * 100) / 100;
+  return { ...finalized, totalAmount: total, extracted: { ...finalized.extracted, total_amount: total } };
+}
 
 /**
  * El total del QR de ARCA es exacto: la reconciliación algebraica (finalizeExtractedAmounts)

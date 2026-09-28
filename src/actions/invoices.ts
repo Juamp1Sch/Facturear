@@ -71,7 +71,12 @@ import { extractInvoiceV2 } from "@/lib/extraction-v2/pipeline";
 import type { MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
 import type { ExtractionReview } from "@/lib/extraction-v2/review";
 import { validateExtraction } from "@/lib/extraction-v2/validate";
-import { lockQrTotal } from "@/lib/extraction-v2/qr-total";
+import {
+  excludeOtherTaxes,
+  lockQrTotal,
+  otherTaxesOf,
+  restoreOtherTaxes,
+} from "@/lib/extraction-v2/qr-total";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -432,10 +437,14 @@ async function applyExtractionToInvoice(
   const qrTotal = options?.review?.verifiedFields?.includes("total")
     ? extracted.total_amount
     : null;
+  const otherTaxes = otherTaxesOf(extracted);
   const finalized = lockQrTotal(
-    await finalizeExtractedAmounts(extracted, visionImages, {
-      precomputedSupplement: amountsSupplement,
-    }),
+    restoreOtherTaxes(
+      await finalizeExtractedAmounts(excludeOtherTaxes(extracted), visionImages, {
+        precomputedSupplement: amountsSupplement,
+      }),
+      otherTaxes,
+    ),
     qrTotal,
   );
   const { extracted: resolvedExtracted, debug: discountResolution } =

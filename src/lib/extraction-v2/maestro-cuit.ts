@@ -29,7 +29,7 @@ function nameTokens(s: string): Set<string> {
     s
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9 ]/g, " ")
       .split(/\s+/)
       .filter((t) => t.length > 2 && !STOPWORDS.has(t)),

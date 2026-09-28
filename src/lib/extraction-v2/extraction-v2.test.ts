@@ -128,7 +128,7 @@ test("validación: CUIT, suma, CAE, fecha y total del QR", () => {
 });
 
 test("applyFiscalData: el ITF solo verifica CUIT y CAE; el QR verifica todo lo que trae", async () => {
-  const { applyFiscalData } = await import("./pipeline");
+  const { applyFiscalData } = await import("./arca-codes");
   const itf = applyFiscalData(base, { source: "ITF", cuit: "30-00000000-7", authType: "CAE", authCode: "66213396734316" });
   assert.deepEqual(itf.verifiedFields, ["cuit", "fiscal_auth"]);
   assert.equal(itf.extracted.invoice_date, base.invoice_date);
@@ -202,4 +202,27 @@ test("QR: importe no finito se descarta", () => {
 test("maestro: un nombre genérico de una palabra no iguala a uno más específico", () => {
   assert.equal(supplierNameSimilarity("ELECTRICIDAD SRL", "ELECTRICIDAD NORTE SA"), 0.5);
   assert.equal(supplierNameSimilarity("JELUZ S.A.C.I.F.I. Y A.", "JELUZ S A C I F I Y A"), 1);
+});
+
+test("otros tributos: se excluyen de la reconciliación y se suman de vuelta", async () => {
+  const { excludeOtherTaxes, otherTaxesOf, restoreOtherTaxes } = await import("./qr-total");
+  const e = { ...base, net_amount: 1000, vat_amount: 210, perceptions_amount: 0, total_amount: 1310, other_taxes_amount: 100 } as InvoiceExtraction;
+  assert.equal(otherTaxesOf(e), 100);
+  assert.equal(excludeOtherTaxes(e).total_amount, 1210);
+  const finalized = {
+    netAmount: 1000, vatAmount: 210, perceptionsAmount: 0, totalAmount: 1210, amountsReconciled: true,
+    amountsDiscrepancy: null, amountsAlgebraicallyDerived: false, correctedField: null, extracted: { ...e, total_amount: 1210 },
+  };
+  assert.equal(restoreOtherTaxes(finalized, 100).totalAmount, 1310);
+  assert.equal(restoreOtherTaxes(finalized, 0), finalized);
+});
+
+test("QR vs lo impreso: marca CUIT muy distinto y total impreso que cierra pero difiere", async () => {
+  const { compareQrWithPrintedReading } = await import("./pipeline");
+  const qr = { source: "QR" as const, cuit: "30-71178446-9", total: 1546.72, authType: "CAE" as const, authCode: "86041474598043" };
+  assert.deepEqual(compareQrWithPrintedReading(base, qr), []);
+  assert.deepEqual(compareQrWithPrintedReading({ ...base, cuit: "30-71784460-9" }, qr), []); // error de OCR (<= 2)
+  assert.deepEqual(compareQrWithPrintedReading({ ...base, cuit: "30-50289158-4" }, qr).map((i) => i.field), ["cuit"]);
+  const otherTotal = { ...qr, total: 2000 };
+  assert.deepEqual(compareQrWithPrintedReading(base, otherTotal).map((i) => i.field), ["amounts"]);
 });

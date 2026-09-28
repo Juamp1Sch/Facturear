@@ -152,9 +152,14 @@ export function InvoiceDetail({
           {invoice.status}
         </Badge>
         {showAmountsReview ? (
-          <Badge variant="outline" className="border-amber-500 text-amber-800 dark:text-amber-300">
+          <Badge
+            variant="outline"
+            className="border-amber-500 text-amber-800 dark:text-amber-300"
+            title={v2Review?.fields.amounts}
+          >
             Revisar importes
-            {amountsReview.discrepancy != null
+            {/* Con v2 el motivo (tooltip) es la fuente; la dif. del reconciliador usa otra tolerancia. */}
+            {!v2Review && amountsReview.discrepancy != null
               ? ` (dif. ${formatMoney(Math.abs(amountsReview.discrepancy))})`
               : ""}
           </Badge>

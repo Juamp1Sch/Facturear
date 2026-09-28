@@ -7,11 +7,7 @@ import {
   extractInvoiceDataV2,
   imageDetailForCurrentModel,
 } from "@/lib/ai";
-import {
-  documentKindForComprobanteCode,
-  letterForComprobanteCode,
-  type ArcaFiscalData,
-} from "@/lib/extraction-v2/arca-codes";
+import { applyFiscalData, type ArcaFiscalData } from "@/lib/extraction-v2/arca-codes";
 import { decodeArcaFiscalData, type DecodePage } from "@/lib/extraction-v2/decode-arca";
 import {
   levenshtein,
@@ -115,37 +111,40 @@ function systemPrompt(opts: ExtractionV2Options): string {
   return blocks.length ? `${EXTRACTION_SYSTEM_PROMPT_V2}\n\n---\n${blocks.join("\n\n---\n")}` : EXTRACTION_SYSTEM_PROMPT_V2;
 }
 
-/** Pisa la lectura del modelo con los datos exactos del código y devuelve qué campos aplicó. */
-export function applyFiscalData(
-  e: InvoiceExtraction,
-  fiscal: ArcaFiscalData,
-): { extracted: InvoiceExtraction; verifiedFields: VerifiedField[] } {
-  const out = { ...e, cuit: fiscal.cuit, fiscal_auth_type: fiscal.authType, fiscal_auth_code: fiscal.authCode };
-  const verifiedFields: VerifiedField[] = ["cuit", "fiscal_auth"];
-  if (fiscal.date) {
-    out.invoice_date = fiscal.date;
-    verifiedFields.push("invoice_date");
+const CUIT_MAX_READ_DISTANCE = 2;
+const QR_TOTAL_MISMATCH_RATIO = 0.005;
+const SUM_TOLERANCE = 0.05;
+
+/**
+ * Diferencias claras entre el QR y lo impreso (según la lectura del modelo): CUIT a más de 2
+ * dígitos (más que un error de OCR) o un total impreso que cierra con su propio desglose pero
+ * no con el del QR.
+ */
+export function compareQrWithPrintedReading(
+  read: InvoiceExtraction & { other_taxes_amount?: number | null },
+  qr: ArcaFiscalData,
+): ReviewIssue[] {
+  const issues: ReviewIssue[] = [];
+  const readCuit = (read.cuit ?? "").replace(/\D/g, "");
+  if (readCuit.length === 11 && levenshtein(readCuit, qr.cuit.replace(/\D/g, "")) > CUIT_MAX_READ_DISTANCE) {
+    issues.push({
+      field: "cuit",
+      reason: `El CUIT del QR (${qr.cuit}) no coincide con el impreso en el comprobante (${read.cuit}).`,
+    });
   }
-  if (fiscal.pointOfSale != null && fiscal.number != null) {
-    out.invoice_number = `${String(fiscal.pointOfSale).padStart(5, "0")}-${String(fiscal.number).padStart(8, "0")}`;
-    verifiedFields.push("invoice_number");
+  if (qr.total != null && read.total_amount != null && read.net_amount != null) {
+    const sum =
+      read.net_amount + (read.vat_amount ?? 0) + (read.perceptions_amount ?? 0) + (read.other_taxes_amount ?? 0);
+    const printedCloses = Math.abs(sum - read.total_amount) <= SUM_TOLERANCE;
+    const differs = Math.abs(read.total_amount - qr.total) > Math.max(SUM_TOLERANCE, qr.total * QR_TOTAL_MISMATCH_RATIO);
+    if (printedCloses && differs) {
+      issues.push({
+        field: "amounts",
+        reason: `El total impreso (${read.total_amount.toFixed(2)}) cierra con su desglose pero no coincide con el del QR (${qr.total.toFixed(2)}).`,
+      });
+    }
   }
-  const letter = letterForComprobanteCode(fiscal.comprobanteCode);
-  if (letter) {
-    out.invoice_type = letter;
-    verifiedFields.push("invoice_type");
-  }
-  if (fiscal.comprobanteCode != null) out.afip_comprobante_code = String(fiscal.comprobanteCode).padStart(2, "0");
-  const kind = documentKindForComprobanteCode(fiscal.comprobanteCode);
-  if (kind) out.document_kind = kind;
-  if (fiscal.total != null) {
-    out.total_amount = fiscal.total;
-    verifiedFields.push("total");
-  }
-  if (fiscal.currency === "DOL" && fiscal.exchangeRate != null && fiscal.exchangeRate > 1) {
-    out.exchange_rate = fiscal.exchangeRate;
-  }
-  return { extracted: out, verifiedFields };
+  return issues;
 }
 
 export async function extractInvoiceV2(
@@ -243,6 +242,10 @@ export async function extractInvoiceV2(
       fiscal = itfCandidate;
     }
   }
+  // El host del QR prueba el formato, no la autenticidad: un QR mal generado (o de otro
+  // comprobante) puede traer datos que no coinciden con lo impreso. Se contrasta con la
+  // primera lectura del modelo y, si difiere claramente, se marca para revisar.
+  const qrMismatch = fiscal?.source === "QR" ? compareQrWithPrintedReading(first, fiscal) : [];
   const withFiscal = (e: InvoiceExtraction) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
   let extracted = withFiscal(first);
   let issues = validateExtraction(extracted, fiscal);
@@ -266,7 +269,7 @@ export async function extractInvoiceV2(
 
   let cuitCorrection: ExtractionReview["cuitCorrection"];
   let verifiedFields: VerifiedField[] = [];
-  const extraIssues: ReviewIssue[] = [];
+  const extraIssues: ReviewIssue[] = [...qrMismatch];
   if (fiscal) {
     verifiedFields = applyFiscalData(extracted, fiscal).verifiedFields;
   } else if (opts.maestro.length > 0 && extracted.cuit) {

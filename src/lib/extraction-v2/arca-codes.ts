@@ -1,4 +1,6 @@
 import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
+import type { VerifiedField } from "@/lib/extraction-v2/review";
+import type { InvoiceExtraction } from "@/lib/schemas";
 
 /**
  * Datos fiscales leídos del QR de ARCA (RG 4892/2020) o del código de barras ITF de
@@ -125,4 +127,38 @@ export function documentKindForComprobanteCode(
   if ([2, 7, 12, 20, 52, 202, 207, 212].includes(code)) return "NOTA_DEBITO";
   if ([3, 8, 13, 21, 53, 203, 208, 213].includes(code)) return "NOTA_CREDITO";
   return null;
+}
+
+/** Pisa la lectura del modelo con los datos exactos del código y devuelve qué campos aplicó. */
+export function applyFiscalData(
+  e: InvoiceExtraction,
+  fiscal: ArcaFiscalData,
+): { extracted: InvoiceExtraction; verifiedFields: VerifiedField[] } {
+  const out = { ...e, cuit: fiscal.cuit, fiscal_auth_type: fiscal.authType, fiscal_auth_code: fiscal.authCode };
+  const verifiedFields: VerifiedField[] = ["cuit", "fiscal_auth"];
+  if (fiscal.date) {
+    out.invoice_date = fiscal.date;
+    verifiedFields.push("invoice_date");
+  }
+  if (fiscal.pointOfSale != null && fiscal.number != null) {
+    out.invoice_number = `${String(fiscal.pointOfSale).padStart(5, "0")}-${String(fiscal.number).padStart(8, "0")}`;
+    verifiedFields.push("invoice_number");
+  }
+  const letter = letterForComprobanteCode(fiscal.comprobanteCode);
+  if (letter) {
+    out.invoice_type = letter;
+    verifiedFields.push("invoice_type");
+  }
+  if (fiscal.comprobanteCode != null) out.afip_comprobante_code = String(fiscal.comprobanteCode).padStart(2, "0");
+  const kind = documentKindForComprobanteCode(fiscal.comprobanteCode);
+  if (kind) out.document_kind = kind;
+  if (fiscal.total != null) {
+    out.total_amount = fiscal.total;
+    verifiedFields.push("total");
+  }
+  // Solo dólares: la app convierte USD→ARS. Otras monedas (p. ej. EUR "060") no se soportan aún.
+  if (fiscal.currency === "DOL" && fiscal.exchangeRate != null && fiscal.exchangeRate > 1) {
+    out.exchange_rate = fiscal.exchangeRate;
+  }
+  return { extracted: out, verifiedFields };
 }

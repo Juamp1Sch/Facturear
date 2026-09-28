@@ -40,7 +40,12 @@ type Decoded = { qr: ArcaFiscalData | null; itf: ArcaFiscalData | null };
 
 /** Decodifica un bitmap RGBA. El QR tiene prioridad: trae fecha, número, letra y total. */
 async function decodeRgba(img: sharp.Sharp): Promise<Decoded> {
-  const { data, info } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  // toColourspace: JPG en CMYK darían 5 canales y se descartarían.
+  const { data, info } = await img
+    .toColourspace("srgb")
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
   // zxing espera RGBA: con otra cantidad de canales (p. ej. grayscale() de sharp da 1) el WASM
   // lee fuera del buffer ("memory access out of bounds") y queda inutilizable.
   if (info.channels !== 4) return { qr: null, itf: null };
