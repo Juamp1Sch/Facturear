@@ -36,51 +36,74 @@ async function loadZXing(): Promise<void> {
   await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
 }
 
-async function decodeOnce(image: Buffer): Promise<ArcaFiscalData | null> {
-  const { data, info } = await sharp(image)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+type Decoded = { qr: ArcaFiscalData | null; itf: ArcaFiscalData | null };
+
+/** Decodifica un bitmap RGBA. El QR tiene prioridad: trae fecha, número, letra y total. */
+async function decodeRgba(img: sharp.Sharp): Promise<Decoded> {
+  const { data, info } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  // zxing espera RGBA: con otra cantidad de canales (p. ej. grayscale() de sharp da 1) el WASM
+  // lee fuera del buffer ("memory access out of bounds") y queda inutilizable.
+  if (info.channels !== 4) return { qr: null, itf: null };
   const results = await readBarcodes(
-    { data: new Uint8ClampedArray(data), width: info.width, height: info.height, colorSpace: "srgb" },
-    { formats: ["QRCode", "ITF"], tryHarder: true, tryRotate: true, maxNumberOfSymbols: 3 },
+    {
+      // Vista sobre el mismo buffer (sin copiar ~50 MB en una página ampliada).
+      data: new Uint8ClampedArray(data.buffer as ArrayBuffer, data.byteOffset, data.length),
+      width: info.width,
+      height: info.height,
+      colorSpace: "srgb",
+    },
+    { formats: ["QRCode", "ITF"], tryHarder: true, tryRotate: true, maxNumberOfSymbols: 4 },
   );
+  const out: Decoded = { qr: null, itf: null };
   for (const r of results) {
-    const parsed = r.format === "QRCode" ? parseArcaQrText(r.text) : parseArcaItfText(r.text);
-    if (parsed) return parsed;
+    if (r.format === "QRCode") out.qr ??= parseArcaQrText(r.text);
+    else out.itf ??= parseArcaItfText(r.text);
   }
-  return null;
+  return out;
 }
+
+export type DecodePage = {
+  buffer: Buffer;
+  /**
+   * Fotos: el QR es chico (módulos de 1-2 px) y se reintenta ampliado. Las páginas de PDF ya se
+   * rasterizan con buena resolución: se evita el costo de memoria y tiempo de ampliarlas.
+   */
+  enlargeIfSmall: boolean;
+};
 
 /**
  * Busca el QR / código de barras fiscal de ARCA en las páginas (de la última a la primera,
- * porque suele estar al pie). En fotos el QR es chico: se reintenta ampliado y con contraste.
+ * porque suele estar al pie). Un QR en cualquier página gana sobre un ITF.
  */
-export async function decodeArcaFiscalData(pages: Buffer[]): Promise<ArcaFiscalData | null> {
+export async function decodeArcaFiscalData(pages: DecodePage[]): Promise<ArcaFiscalData | null> {
+  let itfFallback: ArcaFiscalData | null = null;
   try {
     await ensureZXing();
     for (const page of [...pages].reverse()) {
-      const oriented = await sharp(page).rotate().toBuffer();
-      const direct = await decodeOnce(oriented);
-      if (direct) return direct;
+      const oriented = await sharp(page.buffer).rotate().toBuffer();
+      const direct = await decodeRgba(sharp(oriented));
+      if (direct.qr) return direct.qr;
+      itfFallback ??= direct.itf;
+
+      if (!page.enlargeIfSmall) continue;
       const meta = await sharp(oriented).metadata();
       const w = meta.width ?? 0;
       const h = meta.height ?? 0;
       if (w > 0 && h > 0 && Math.min(w, h) < 2500) {
-        const enlarged = await sharp(oriented)
-          .resize(w * 2, h * 2, { kernel: sharp.kernel.lanczos3 })
-          .grayscale()
-          .normalize()
-          .sharpen({ sigma: 1.5 })
-          .png()
-          .toBuffer();
-        const retry = await decodeOnce(enlarged);
-        if (retry) return retry;
+        const enlarged = await decodeRgba(
+          sharp(oriented)
+            .resize(w * 2, h * 2, { kernel: sharp.kernel.lanczos3 })
+            // En color (no grayscale): zxing necesita RGBA y la ampliación + contraste alcanza.
+            .normalize()
+            .sharpen({ sigma: 1.5 }),
+        );
+        if (enlarged.qr) return enlarged.qr;
+        itfFallback ??= enlarged.itf;
       }
     }
   } catch (err) {
     // Sin QR legible se sigue solo con el modelo: nunca debe cortar la extracción.
     console.error("[extraction-v2] decodeArcaFiscalData falló", err);
   }
-  return null;
+  return itfFallback;
 }

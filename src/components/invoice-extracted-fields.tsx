@@ -402,8 +402,8 @@ export function InvoiceExtractedFields({
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
   // Tras una edición manual (CORRECTED) los datos ya los confirmó una persona: no se marcan.
-  const extractionReview =
-    invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
+  const v2Review = readExtractionReview(invoice.aiPayload);
+  const extractionReview = invoice.status === "CORRECTED" ? null : v2Review;
   // Convertida a ARS: el total ya no es el del QR y los motivos de importes quedaron en USD.
   const reviewFields = invoice.isConverted
     ? { ...extractionReview?.fields, amounts: undefined }
@@ -510,7 +510,7 @@ export function InvoiceExtractedFields({
         ) : null}
 
         {/* Con extracción v2 la marca de importes es la estricta de review (badge en Total). */}
-        {amountsReview.needsReview && !extractionReview ? (
+        {amountsReview.needsReview && !v2Review ? (
           <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
             Revisar importes: la suma neto + IVA + percepciones no coincide con el
             total

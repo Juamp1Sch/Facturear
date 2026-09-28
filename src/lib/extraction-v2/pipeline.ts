@@ -7,8 +7,12 @@ import {
   letterForComprobanteCode,
   type ArcaFiscalData,
 } from "@/lib/extraction-v2/arca-codes";
-import { decodeArcaFiscalData } from "@/lib/extraction-v2/decode-arca";
-import { matchCuitAgainstMaestro, type MaestroSupplier } from "@/lib/extraction-v2/maestro-cuit";
+import { decodeArcaFiscalData, type DecodePage } from "@/lib/extraction-v2/decode-arca";
+import {
+  levenshtein,
+  matchCuitAgainstMaestro,
+  type MaestroSupplier,
+} from "@/lib/extraction-v2/maestro-cuit";
 import { EXTRACTION_SYSTEM_PROMPT_V2 } from "@/lib/extraction-v2/prompt";
 import type { ExtractionReview, ReviewFieldKey, VerifiedField } from "@/lib/extraction-v2/review";
 import { validateExtraction, type ReviewIssue } from "@/lib/extraction-v2/validate";
@@ -144,6 +148,7 @@ export async function extractInvoiceV2(
   opts: ExtractionV2Options,
 ): Promise<ExtractionV2Result> {
   const pages: Buffer[] = [];
+  const decodePages: DecodePage[] = [];
   const visionImages: VisionImage[] = [];
   const texts: string[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -155,17 +160,19 @@ export async function extractInvoiceV2(
       }
       for (const png of await rasterizePdfPagesPng(part.buffer, { scale: PDF_RENDER_SCALE })) {
         pages.push(png);
+        decodePages.push({ buffer: png, enlargeIfSmall: false });
         visionImages.push({ buffer: png, mimeType: "image/png" });
       }
     } else {
       pages.push(part.buffer);
+      decodePages.push({ buffer: part.buffer, enlargeIfSmall: true });
       visionImages.push({ buffer: part.buffer, mimeType: part.mimeType === "image/png" ? "image/png" : "image/jpeg" });
     }
   }
   if (pages.length === 0) throw new Error("No hay páginas para procesar.");
 
-  const [fiscal, preparedPages, headerCrop, footerCrop] = await Promise.all([
-    decodeArcaFiscalData(pages),
+  const [decoded, preparedPages, headerCrop, footerCrop] = await Promise.all([
+    decodeArcaFiscalData(decodePages),
     Promise.all(pages.map((p) => prepareImage(p, PAGE_MIN_SIDE_PX))),
     cropBand(pages[0]!, HEADER_CROP),
     cropBand(pages[pages.length - 1]!, FOOTER_CROP),
@@ -184,20 +191,39 @@ export async function extractInvoiceV2(
   content.push(imagePart(headerCrop));
   content.push({ type: "text", text: `Ampliación del pie (página ${pages.length}):` });
   content.push(imagePart(footerCrop));
+  // El QR de ARCA (host validado) es verdad. Un ITF podría ser otro código impreso (p. ej. de
+  // cobro): es verdad solo si su CUIT ya está en el maestro; si no, evidencia a confirmar.
+  const maestroHas = (cuit: string) =>
+    opts.maestro.some((m) => m.cuit.replace(/\D/g, "") === cuit.replace(/\D/g, ""));
+  let fiscal: ArcaFiscalData | null =
+    decoded && (decoded.source === "QR" || maestroHas(decoded.cuit)) ? decoded : null;
+  const itfCandidate = decoded && !fiscal ? decoded : null;
   if (fiscal) {
     content.push({
       type: "text",
       text: `Datos decodificados por software del ${fiscal.source === "QR" ? "QR" : "código de barras"} fiscal de ARCA de este comprobante (exactos, usalos como verdad): ${JSON.stringify(fiscal)}`,
+    });
+  } else if (itfCandidate) {
+    content.push({
+      type: "text",
+      text: `Se decodificó un código de barras del documento que podría ser el fiscal de ARCA: ${JSON.stringify(itfCandidate)}. Usalo solo si su CUIT es el del EMISOR que ves impreso.`,
     });
   }
 
   const prompt = systemPrompt(opts);
   // Los datos del QR/ITF se aplican ANTES de validar: si el modelo erró un campo que el código
   // ya trae exacto, no hace falta una 2da pasada por eso.
+  const first = await extractInvoiceDataV2({ systemPrompt: prompt, content, reasoningEffort: "low", pass: "v2" });
+  // El ITF no confirmado se acepta si el CUIT que leyó el modelo en el membrete es el mismo o
+  // casi (1-2 dígitos): así se descartan códigos de barras que no son del comprobante.
+  if (itfCandidate) {
+    const read = (first.cuit ?? "").replace(/\D/g, "");
+    if (read.length === 11 && levenshtein(read, itfCandidate.cuit.replace(/\D/g, "")) <= 2) {
+      fiscal = itfCandidate;
+    }
+  }
   const withFiscal = (e: InvoiceExtraction) => (fiscal ? applyFiscalData(e, fiscal).extracted : e);
-  let extracted = withFiscal(
-    await extractInvoiceDataV2({ systemPrompt: prompt, content, reasoningEffort: "low", pass: "v2" }),
-  );
+  let extracted = withFiscal(first);
   let issues = validateExtraction(extracted, fiscal);
 
   if (issues.length > 0) {

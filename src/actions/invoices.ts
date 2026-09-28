@@ -390,13 +390,18 @@ async function applyExtractionToInvoice(
     select: { empresa: true, sucursal: true },
   });
 
+  // CUIT exacto (QR/ITF de ARCA) o corregido con el maestro: manda sobre el match por nombre.
+  const cuitIsVerified = Boolean(
+    options?.review?.verifiedFields?.includes("cuit") || options?.review?.cuitCorrection,
+  );
   const resolved = await resolveOrCreateInvoiceSupplier(
     userId,
     extracted.provider,
     extracted.cuit,
+    options?.review ? { cuitIsVerified, onlyTrustworthyCuitForNewSupplier: true } : {},
   );
   const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
-  const providerCuit = resolved?.cuit ?? aiCuit;
+  const providerCuit = cuitIsVerified ? (aiCuit ?? resolved?.cuit ?? null) : (resolved?.cuit ?? aiCuit);
   const supplierCode = resolved?.code ?? null;
 
   let empresaOut = prior?.empresa ?? null;

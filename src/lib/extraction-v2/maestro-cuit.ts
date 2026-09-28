@@ -46,7 +46,8 @@ export function supplierNameSimilarity(a: string, b: string): number {
   return shared / Math.min(A.size, B.size);
 }
 
-function levenshtein(a: string, b: string): number {
+/** Distancia de edición entre dos cadenas de dígitos (cambios, faltantes o sobrantes). */
+export function levenshtein(a: string, b: string): number {
   const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     let diag = prev[0]!;
@@ -61,7 +62,7 @@ function levenshtein(a: string, b: string): number {
 }
 
 const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
-const formatCuit = (d: string) => `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
+const formatCuitDigits = (d: string) => `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
 
 export function matchCuitAgainstMaestro(
   maestro: MaestroSupplier[],
@@ -73,7 +74,7 @@ export function matchCuitAgainstMaestro(
   if (maestro.some((m) => digits(m.cuit) === read)) return { status: "known" };
   if (!providerName?.trim()) return { status: "unknown" };
 
-  const readIsValid = normalizeArgentineCuitOrNull(formatCuit(read)) != null;
+  const readIsValid = normalizeArgentineCuitOrNull(formatCuitDigits(read)) != null;
   const candidates = maestro
     .map((m) => {
       const d = digits(m.cuit);
@@ -97,5 +98,5 @@ export function matchCuitAgainstMaestro(
   if (second && second.d !== best.d && second.distance === best.distance && second.similarity === best.similarity) {
     return { status: "unknown" };
   }
-  return { status: "corrected", cuit: formatCuit(best.d), supplierName: best.m.name, distance: best.distance };
+  return { status: "corrected", cuit: formatCuitDigits(best.d), supplierName: best.m.name, distance: best.distance };
 }

@@ -95,10 +95,9 @@ export function InvoiceDetail({
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
   // Misma regla que en el detalle de campos: con extracción v2 manda la marca estricta de review
   // (y no aplica a facturas corregidas a mano ni convertidas a ARS).
-  const extractionReview =
-    invoice.status === "CORRECTED" ? null : readExtractionReview(invoice.aiPayload);
-  const showAmountsReview = extractionReview
-    ? Boolean(extractionReview.fields.amounts) && !invoice.isConverted
+  const v2Review = readExtractionReview(invoice.aiPayload);
+  const showAmountsReview = v2Review
+    ? invoice.status !== "CORRECTED" && !invoice.isConverted && Boolean(v2Review.fields.amounts)
     : amountsReview.needsReview;
   const showMissingPuntoDeVentaWarning = needsMissingPuntoDeVentaWarning(
     invoice.invoiceNumber,

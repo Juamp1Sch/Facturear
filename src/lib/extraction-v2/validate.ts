@@ -3,11 +3,8 @@ import type { ArcaFiscalData } from "@/lib/extraction-v2/arca-codes";
 import type { ReviewFieldKey } from "@/lib/extraction-v2/review";
 import type { InvoiceExtraction } from "@/lib/schemas";
 
-/** Campos que la UI puede marcar como "Revisar". */
-export type ReviewField = ReviewFieldKey;
-
 export type ReviewIssue = {
-  field: ReviewField;
+  field: ReviewFieldKey;
   /** Motivo para el usuario (se muestra al pasar el mouse sobre "Revisar"). */
   reason: string;
   /** Indicación para la 2da pasada del modelo (qué releer). */

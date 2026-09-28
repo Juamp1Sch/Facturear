@@ -165,3 +165,25 @@ test("lockQrTotal: restaura el total del QR si la reconciliación lo cambió", (
   assert.equal(locked.amountsAlgebraicallyDerived, false);
   assert.equal(lockQrTotal(finalized, null), finalized);
 });
+
+test("readExtractionReview: descarta motivos que no son texto y correcciones mal formadas", () => {
+  const r = readExtractionReview({
+    review: { version: 2, fields: { cuit: { x: 1 }, amounts: "ok", foo: "bar" }, cuitCorrection: { to: 5 } },
+  });
+  assert.deepEqual(r?.fields, { amounts: "ok" });
+  assert.equal(r?.cuitCorrection, undefined);
+});
+
+test("match de proveedor: con CUIT verificado gana el CUIT sobre el nombre", async () => {
+  const { matchSupplierFromList } = await import("../supplier-match");
+  const suppliers = [
+    { code: "1", name: "CORESA GROUP SRL", cuit: "30-71178446-9" },
+    { code: "2", name: "CORESA", cuit: "30-99999999-7" },
+  ];
+  // Sin verificar: el nombre (prefijo) manda, comportamiento histórico.
+  assert.equal(matchSupplierFromList(suppliers, "CORESA S.A.", "30-71178446-9")?.code, "2");
+  // Verificado (QR): manda el CUIT exacto.
+  assert.equal(matchSupplierFromList(suppliers, "CORESA S.A.", "30-71178446-9", { cuitIsVerified: true })?.code, "1");
+  // Verificado y sin match por CUIT: no se toma un proveedor por nombre con OTRO CUIT.
+  assert.equal(matchSupplierFromList(suppliers, "CORESA S.A.", "30-00000000-7", { cuitIsVerified: true }), null);
+});
