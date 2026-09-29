@@ -34,6 +34,22 @@ export function UploadFilePreviewDialog({
     if (!preview && dialog.open) dialog.close();
   }, [preview]);
 
+  // `showModal()` no bloquea el scroll de la página de atrás. Se compensa el ancho de la barra
+  // de scroll para que el fondo no se corra al ocultarla.
+  const isOpen = preview != null;
+  useEffect(() => {
+    if (!isOpen) return;
+    const root = document.documentElement;
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+    const previous = { overflow: root.style.overflow, paddingRight: root.style.paddingRight };
+    root.style.overflow = "hidden";
+    if (scrollbarWidth > 0) root.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      root.style.overflow = previous.overflow;
+      root.style.paddingRight = previous.paddingRight;
+    };
+  }, [isOpen]);
+
   return (
     <dialog
       ref={dialogRef}
