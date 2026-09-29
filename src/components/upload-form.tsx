@@ -24,6 +24,10 @@ import {
   type UploadBatchState,
 } from "@/actions/invoices";
 import { UploadBatchResultsView } from "@/components/upload-batch-results-view";
+import {
+  UploadFilePreviewDialog,
+  type UploadFilePreview,
+} from "@/components/upload-file-preview-dialog";
 import { compressInvoiceImage } from "@/lib/client-image-compress";
 import {
   UPLOAD_REQUEST_MAX_BYTES,
@@ -214,8 +218,22 @@ export function UploadForm({
     SerializedBatchInvoice[] | null
   >(null);
 
+  // URL propia del modal (no la de la miniatura): se crea al abrir y se revoca al cerrar.
+  const [filePreview, setFilePreview] = useState<UploadFilePreview | null>(null);
+  useEffect(() => {
+    return () => {
+      if (filePreview) URL.revokeObjectURL(filePreview.url);
+    };
+  }, [filePreview]);
+
   const groups = useMemo(() => buildGroups(items), [items]);
   const invoiceCount = groups.length;
+  /** Número de factura de cada archivo (una continuación comparte el de la anterior). */
+  const invoiceNumberByIndex = useMemo(() => {
+    const byIndex: number[] = [];
+    groups.forEach((group, g) => group.forEach((idx) => (byIndex[idx] = g + 1)));
+    return byIndex;
+  }, [groups]);
 
   const onDrop = useCallback((accepted: File[]) => {
     setItems((prev) => {
@@ -341,15 +359,20 @@ export function UploadForm({
     return `Parte ${part}`;
   };
 
-  const getInvoiceNumber = (index: number): number => {
-    let n = 1;
-    for (let i = 0; i <= index; i++) {
-      if (i === 0 || !items[i]?.isContinuation) {
-        if (i === index) return n;
-        n++;
-      }
-    }
-    return n;
+  const openPreview = (item: QueueItem, label: string) => {
+    const isPdf = isPdfFile(item.file);
+    // El dropzone acepta PDFs con tipo vacío u octet-stream (por extensión): con ese tipo el
+    // navegador descarga el blob en vez de mostrarlo en el iframe.
+    const blob =
+      isPdf && item.file.type !== "application/pdf"
+        ? item.file.slice(0, item.file.size, "application/pdf")
+        : item.file;
+    setFilePreview({
+      url: URL.createObjectURL(blob),
+      mimeType: isPdf ? "application/pdf" : item.file.type || "image/jpeg",
+      fileName: item.file.name,
+      label,
+    });
   };
 
   const handleSubmit = (formData: FormData) => {
@@ -438,21 +461,31 @@ export function UploadForm({
               {items.length > 0 ? (
                 <ul className="space-y-3">
                   {items.map((item, index) => {
-                    const isPdf =
-                      item.file.type === "application/pdf" ||
-                      item.file.name.toLowerCase().endsWith(".pdf");
+                    const isPdf = isPdfFile(item.file);
                     const partLabel = getPartLabel(index);
-                    const invoiceNum = getInvoiceNumber(index);
+                    const invoiceNum = invoiceNumberByIndex[index]!;
+                    // El primer archivo siempre abre una factura (así agrupa buildGroups), aunque
+                    // haya quedado marcado como continuación al reordenar.
+                    const isContinuation = index > 0 && item.isContinuation;
+                    const label = isContinuation
+                      ? `Factura ${invoiceNum} · ${partLabel ?? "Continuación"}`
+                      : `Factura ${invoiceNum}`;
 
                     return (
                       <li
                         key={item.id}
                         className={cn(
                           "flex gap-3 rounded-lg border border-border p-3",
-                          item.isContinuation && "border-primary/30 bg-muted/20",
+                          isContinuation && "border-primary/30 bg-muted/20",
                         )}
                       >
-                        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
+                        <button
+                          type="button"
+                          onClick={() => openPreview(item, label)}
+                          aria-label={`Ver ${item.file.name}`}
+                          title="Ver vista previa"
+                          className="flex size-14 shrink-0 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40 transition-shadow hover:ring-2 hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        >
                           {item.preview ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -465,16 +498,21 @@ export function UploadForm({
                           ) : (
                             <ImageIcon className="size-8 text-muted-foreground" />
                           )}
-                        </div>
+                        </button>
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-medium">
+                            <button
+                              type="button"
+                              onClick={() => openPreview(item, label)}
+                              title="Ver vista previa"
+                              className="min-w-0 cursor-zoom-in truncate text-left text-sm font-medium underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                            >
                               {item.file.name}
-                            </span>
+                            </button>
                             <span className="text-xs text-muted-foreground">
                               {formatBytes(item.file.size)}
                             </span>
-                            {!item.isContinuation ? (
+                            {!isContinuation ? (
                               <Badge variant="secondary">
                                 Factura {invoiceNum}
                               </Badge>
@@ -556,6 +594,11 @@ export function UploadForm({
           )}
         </CardContent>
       </Card>
+
+      <UploadFilePreviewDialog
+        preview={filePreview}
+        onClose={() => setFilePreview(null)}
+      />
 
       {batchDone && state.status === "ok" ? (
         <UploadBatchResultsView
