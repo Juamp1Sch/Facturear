@@ -245,7 +245,11 @@ export function InvoiceDocumentPreview({
           onMouseDown={handleMouseDown}
         >
           <div
-            className="flex min-h-full min-w-full items-center justify-center p-2"
+            className={cn(
+              "flex min-h-full min-w-full items-center justify-center p-2",
+              // Con altura fija, `max-h-full` de la imagen resuelve: a 100% entra entera.
+              scale === 1 && "h-full",
+            )}
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px)`,
             }}

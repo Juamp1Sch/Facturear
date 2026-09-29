@@ -24,6 +24,10 @@ import {
   type UploadBatchState,
 } from "@/actions/invoices";
 import { UploadBatchResultsView } from "@/components/upload-batch-results-view";
+import {
+  UploadFilePreviewDialog,
+  type UploadFilePreview,
+} from "@/components/upload-file-preview-dialog";
 import { compressInvoiceImage } from "@/lib/client-image-compress";
 import {
   UPLOAD_REQUEST_MAX_BYTES,
@@ -214,6 +218,14 @@ export function UploadForm({
     SerializedBatchInvoice[] | null
   >(null);
 
+  // URL propia del modal (no la de la miniatura): se crea al abrir y se revoca al cerrar.
+  const [filePreview, setFilePreview] = useState<UploadFilePreview | null>(null);
+  useEffect(() => {
+    return () => {
+      if (filePreview) URL.revokeObjectURL(filePreview.url);
+    };
+  }, [filePreview]);
+
   const groups = useMemo(() => buildGroups(items), [items]);
   const invoiceCount = groups.length;
 
@@ -352,6 +364,15 @@ export function UploadForm({
     return n;
   };
 
+  const openPreview = (item: QueueItem, label: string) => {
+    setFilePreview({
+      url: URL.createObjectURL(item.file),
+      mimeType: isPdfFile(item.file) ? "application/pdf" : item.file.type || "image/jpeg",
+      fileName: item.file.name,
+      label,
+    });
+  };
+
   const handleSubmit = (formData: FormData) => {
     setShowNewBatch(false);
     formData.delete("files");
@@ -443,6 +464,11 @@ export function UploadForm({
                       item.file.name.toLowerCase().endsWith(".pdf");
                     const partLabel = getPartLabel(index);
                     const invoiceNum = getInvoiceNumber(index);
+                    // Factura a la que pertenece el archivo (una continuación es parte de la anterior).
+                    const groupNum = groups.findIndex((g) => g.includes(index)) + 1;
+                    const label = item.isContinuation
+                      ? `Factura ${groupNum} · ${partLabel ?? "Continuación"}`
+                      : `Factura ${groupNum}`;
 
                     return (
                       <li
@@ -452,7 +478,13 @@ export function UploadForm({
                           item.isContinuation && "border-primary/30 bg-muted/20",
                         )}
                       >
-                        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
+                        <button
+                          type="button"
+                          onClick={() => openPreview(item, label)}
+                          aria-label={`Ver ${item.file.name}`}
+                          title="Ver vista previa"
+                          className="flex size-14 shrink-0 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40 transition-shadow hover:ring-2 hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        >
                           {item.preview ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -465,12 +497,17 @@ export function UploadForm({
                           ) : (
                             <ImageIcon className="size-8 text-muted-foreground" />
                           )}
-                        </div>
+                        </button>
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-medium">
+                            <button
+                              type="button"
+                              onClick={() => openPreview(item, label)}
+                              title="Ver vista previa"
+                              className="min-w-0 cursor-zoom-in truncate text-left text-sm font-medium underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                            >
                               {item.file.name}
-                            </span>
+                            </button>
                             <span className="text-xs text-muted-foreground">
                               {formatBytes(item.file.size)}
                             </span>
@@ -556,6 +593,11 @@ export function UploadForm({
           )}
         </CardContent>
       </Card>
+
+      <UploadFilePreviewDialog
+        preview={filePreview}
+        onClose={() => setFilePreview(null)}
+      />
 
       {batchDone && state.status === "ok" ? (
         <UploadBatchResultsView
