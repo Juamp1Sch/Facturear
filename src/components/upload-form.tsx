@@ -360,9 +360,16 @@ export function UploadForm({
   };
 
   const openPreview = (item: QueueItem, label: string) => {
+    const isPdf = isPdfFile(item.file);
+    // El dropzone acepta PDFs con tipo vacío u octet-stream (por extensión): con ese tipo el
+    // navegador descarga el blob en vez de mostrarlo en el iframe.
+    const blob =
+      isPdf && item.file.type !== "application/pdf"
+        ? item.file.slice(0, item.file.size, "application/pdf")
+        : item.file;
     setFilePreview({
-      url: URL.createObjectURL(item.file),
-      mimeType: isPdfFile(item.file) ? "application/pdf" : item.file.type || "image/jpeg",
+      url: URL.createObjectURL(blob),
+      mimeType: isPdf ? "application/pdf" : item.file.type || "image/jpeg",
       fileName: item.file.name,
       label,
     });
@@ -454,11 +461,9 @@ export function UploadForm({
               {items.length > 0 ? (
                 <ul className="space-y-3">
                   {items.map((item, index) => {
-                    const isPdf =
-                      item.file.type === "application/pdf" ||
-                      item.file.name.toLowerCase().endsWith(".pdf");
+                    const isPdf = isPdfFile(item.file);
                     const partLabel = getPartLabel(index);
-                    const invoiceNum = invoiceNumberByIndex[index] ?? index + 1;
+                    const invoiceNum = invoiceNumberByIndex[index]!;
                     // El primer archivo siempre abre una factura (así agrupa buildGroups), aunque
                     // haya quedado marcado como continuación al reordenar.
                     const isContinuation = index > 0 && item.isContinuation;
