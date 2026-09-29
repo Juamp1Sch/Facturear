@@ -34,6 +34,8 @@ import { Input } from "@/components/ui/input";
 import { formatInvoiceCalendarDate, invoiceDateToInputValue } from "@/lib/invoice-calendar-date";
 import { formatMoney } from "@/lib/format-money";
 import { readAmountsReconcileFlag } from "@/lib/amount-reconcile";
+import { readExtractionReview, type VerifiedField } from "@/lib/extraction-v2/review";
+import { ReviewBadge } from "@/components/review-badge";
 import type { DocumentKind } from "@/lib/comprobante-code";
 import { parseDiscountFromPayload, parseTaxBreakdownFromPayload, needsPerceptionBreakdownWarning } from "@/lib/tax-breakdown";
 import { groupVatLinesByRate, getVatAmountForCode } from "@/lib/vat-rate";
@@ -399,6 +401,19 @@ export function InvoiceExtractedFields({
   const dateStr = formatInvoiceCalendarDate(invoice.invoiceDate);
   const missingEmpresaSucursal = !invoice.empresa?.trim() || !invoice.sucursal?.trim();
   const amountsReview = readAmountsReconcileFlag(invoice.aiPayload);
+  // Tras una edición manual (CORRECTED) los datos ya los confirmó una persona: no se marcan.
+  const v2Review = readExtractionReview(invoice.aiPayload);
+  const extractionReview = invoice.status === "CORRECTED" ? null : v2Review;
+  // Convertida a ARS: el total ya no es el del QR y los motivos de importes quedaron en USD.
+  const reviewFields = invoice.isConverted
+    ? { ...extractionReview?.fields, amounts: undefined }
+    : (extractionReview?.fields ?? {});
+  const verifiedFieldsLabel = formatVerifiedFields(
+    (extractionReview?.verifiedFields ?? []).filter((f) => !(invoice.isConverted && f === "total")),
+  );
+  const generalReviewReasons = [reviewFields.fiscal_auth, reviewFields.extraction].filter(
+    (r): r is string => Boolean(r),
+  );
   const taxBreakdown = parseTaxBreakdownFromPayload(invoice.aiPayload);
   const discountBreakdown = parseDiscountFromPayload(
     invoice.aiPayload,
@@ -469,7 +484,33 @@ export function InvoiceExtractedFields({
           </div>
         ) : null}
 
-        {amountsReview.needsReview ? (
+        {extractionReview?.verifiedBy && verifiedFieldsLabel ? (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
+            {verifiedFieldsLabel} leídos del{" "}
+            {extractionReview.verifiedBy === "QR" ? "QR" : "código de barras"} de ARCA impreso
+            en el comprobante (sin errores de lectura).
+          </div>
+        ) : null}
+
+        {extractionReview?.cuitCorrection ? (
+          <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            CUIT corregido con tu maestro de proveedores (
+            {extractionReview.cuitCorrection.supplierName}): se leyó{" "}
+            {extractionReview.cuitCorrection.from ?? "—"} y se usó{" "}
+            {extractionReview.cuitCorrection.to}.
+          </div>
+        ) : null}
+
+        {generalReviewReasons.length > 0 ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            {generalReviewReasons.map((reason) => (
+              <p key={reason}>Revisar: {reason}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Con extracción v2 la marca de importes es la estricta de review (badge en Total). */}
+        {amountsReview.needsReview && !v2Review ? (
           <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
             Revisar importes: la suma neto + IVA + percepciones no coincide con el
             total
@@ -890,7 +931,10 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">CUIT</dt>
-              <dd className="text-sm break-words">{invoice.providerCuit ?? "—"}</dd>
+              <dd className="text-sm break-words">
+                {invoice.providerCuit ?? "—"}
+                {reviewFields.cuit ? <ReviewBadge reason={reviewFields.cuit} /> : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Código proveedor</dt>
@@ -904,11 +948,21 @@ export function InvoiceExtractedFields({
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Fecha</dt>
-              <dd className="text-sm">{dateStr}</dd>
+              <dd className="text-sm">
+                {dateStr}
+                {reviewFields.invoice_date ? (
+                  <ReviewBadge reason={reviewFields.invoice_date} />
+                ) : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Nº comprobante</dt>
-              <dd className="text-sm break-words">{invoice.invoiceNumber ?? "—"}</dd>
+              <dd className="text-sm break-words">
+                {invoice.invoiceNumber ?? "—"}
+                {reviewFields.invoice_number ? (
+                  <ReviewBadge reason={reviewFields.invoice_number} />
+                ) : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Tipo (letra)</dt>
@@ -1065,7 +1119,10 @@ export function InvoiceExtractedFields({
             ) : null}
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Total</dt>
-              <dd className="text-sm font-medium">{formatMoney(invoice.totalAmount)}</dd>
+              <dd className="text-sm font-medium">
+                {formatMoney(invoice.totalAmount)}
+                {reviewFields.amounts ? <ReviewBadge reason={reviewFields.amounts} /> : null}
+              </dd>
             </div>
             <div className="flex flex-col gap-1 px-3 py-3 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4 sm:py-2.5">
               <dt className="text-sm font-medium text-muted-foreground">Cuenta</dt>
@@ -1145,4 +1202,21 @@ export function InvoiceExtractedFields({
       </CardContent>
     </Card>
   );
+}
+
+const VERIFIED_FIELD_LABELS: Record<VerifiedField, string> = {
+  cuit: "CUIT",
+  invoice_date: "fecha",
+  invoice_number: "número",
+  invoice_type: "letra",
+  total: "total",
+  fiscal_auth: "CAE",
+};
+
+/** "CUIT, fecha, número y CAE" según lo que realmente vino del QR / código de barras. */
+function formatVerifiedFields(fields: VerifiedField[]): string | null {
+  const labels = fields.map((f) => VERIFIED_FIELD_LABELS[f]);
+  if (labels.length === 0) return null;
+  const text = labels.length === 1 ? labels[0]! : `${labels.slice(0, -1).join(", ")} y ${labels.at(-1)}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

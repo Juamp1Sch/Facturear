@@ -31,3 +31,19 @@ export async function loadSupplierMaestroCuitHintsBlock(
   }
   return `${header}${body}`.trimEnd();
 }
+
+/** Tope de seguridad de memoria; bien por encima de cualquier maestro real. */
+const MAESTRO_MATCH_MAX_ROWS = 20_000;
+
+/** Proveedores con CUIT del usuario, para corregir el CUIT leído (extraction-v2/maestro-cuit). */
+export async function loadSupplierMaestroForCuitMatch(
+  userId: string,
+): Promise<{ cuit: string; name: string }[]> {
+  const rows = await prisma.supplier.findMany({
+    where: { userId, cuit: { not: null } },
+    select: { name: true, cuit: true },
+    orderBy: { name: "asc" },
+    take: MAESTRO_MATCH_MAX_ROWS,
+  });
+  return rows.filter((r): r is { name: string; cuit: string } => Boolean(r.cuit));
+}

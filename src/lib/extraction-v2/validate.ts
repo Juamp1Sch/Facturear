@@ -1,0 +1,113 @@
+import { normalizeArgentineCuitOrNull } from "@/lib/cuit-argentina";
+import type { ArcaFiscalData } from "@/lib/extraction-v2/arca-codes";
+import type { ReviewFieldKey } from "@/lib/extraction-v2/review";
+import type { InvoiceExtractionV2Like } from "@/lib/extraction-v2/prompt";
+import { sumTaxLines } from "@/lib/tax-lines";
+
+export type ReviewIssue = {
+  field: ReviewFieldKey;
+  /** Motivo para el usuario (se muestra al pasar el mouse sobre "Revisar"). */
+  reason: string;
+  /** Indicación para la 2da pasada del modelo (qué releer). */
+  retryHint?: string;
+};
+
+/**
+ * Estricta a propósito: solo cubre redondeos de IVA. La tolerancia del reconciliador (0,5% del
+ * total) dejaría pasar un dígito mal leído en un importe de 7 cifras (ej. 1.326.690,59 vs
+ * 1.325.690,59), que es justo el error típico del OCR del modelo.
+ */
+const TOLERANCE = 0.05;
+const CAE_DIGITS = 14;
+const MAX_FUTURE_DAYS = 2;
+
+export function validateExtraction(
+  e: InvoiceExtractionV2Like,
+  /**
+   * Solo se usa para el texto del motivo: los datos del QR ya se aplicaron sobre `e` antes de
+   * validar (el total leído por el modelo nunca queda en conflicto con el del QR).
+   */
+  fiscal: Pick<ArcaFiscalData, "total"> | null,
+  now: Date = new Date(),
+): ReviewIssue[] {
+  const issues: ReviewIssue[] = [];
+
+  if (e.cuit && !normalizeArgentineCuitOrNull(e.cuit)) {
+    issues.push({
+      field: "cuit",
+      reason: `El CUIT leído (${e.cuit}) no tiene un dígito verificador válido.`,
+      retryHint: `El CUIT "${e.cuit}" no pasa el dígito verificador: releé cada dígito del CUIT del EMISOR en la ampliación de la cabecera (y en el código de barras si lo hay).`,
+    });
+  }
+
+  // Se valida lo que se va a guardar y exportar: IVA y percepciones desde sus líneas si existen.
+  const vatLinesSum = sumTaxLines(e.vat_lines);
+  const perceptionLinesSum = sumTaxLines(e.perception_lines);
+  const vat = vatLinesSum ?? e.vat_amount;
+  const perceptions = perceptionLinesSum ?? e.perceptions_amount;
+  for (const [label, linesSum, scalar] of [
+    ["IVA", vatLinesSum, e.vat_amount],
+    ["percepciones", perceptionLinesSum, e.perceptions_amount],
+  ] as const) {
+    if (linesSum != null && scalar != null && Math.abs(linesSum - scalar) > TOLERANCE) {
+      issues.push({
+        field: "amounts",
+        reason: `El detalle de ${label} suma ${linesSum.toFixed(2)} pero el total de ${label} leído es ${scalar.toFixed(2)}.`,
+        retryHint: `Las líneas de ${label} suman ${linesSum.toFixed(2)} pero el total de ${label} es ${scalar}. Releé cada renglón de ${label} y su total.`,
+      });
+    }
+  }
+
+  if (e.net_amount != null && e.total_amount != null) {
+    // Otros tributos (impuestos internos, ITC) también suman al total: sin ellos, comprobantes
+    // de combustibles o telecomunicaciones quedarían marcados aunque estén bien leídos.
+    const sum =
+      e.net_amount + (vat ?? 0) + (perceptions ?? 0) + (e.other_taxes_amount ?? 0);
+    if (Math.abs(sum - e.total_amount) > TOLERANCE) {
+      issues.push({
+        field: "amounts",
+        reason:
+          fiscal?.total != null
+            ? `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total del QR de ARCA (${e.total_amount.toFixed(2)}, exacto): revisá el desglose.`
+            : `Neto + IVA + percepciones${e.other_taxes_amount ? " + otros tributos" : ""} (${sum.toFixed(2)}) no coincide con el total (${e.total_amount.toFixed(2)}).`,
+        retryHint: `Neto ${e.net_amount} + IVA ${vat ?? 0} + percepciones ${perceptions ?? 0} = ${sum.toFixed(2)}, pero el total es ${e.total_amount}. Releé los importes del recuadro de totales dígito por dígito en la ampliación del pie.`,
+      });
+    }
+  }
+  const authDigits = (e.fiscal_auth_code ?? "").replace(/\D/g, "");
+  if ((e.fiscal_auth_type === "CAE" || e.fiscal_auth_type === "CAEA") && authDigits && authDigits.length !== CAE_DIGITS) {
+    issues.push({
+      field: "fiscal_auth",
+      reason: `El ${e.fiscal_auth_type} leído (${e.fiscal_auth_code}) no tiene ${CAE_DIGITS} dígitos.`,
+      retryHint: `El ${e.fiscal_auth_type} "${e.fiscal_auth_code}" no tiene ${CAE_DIGITS} dígitos: releelo en la ampliación del pie (y comparalo con el código de barras si lo hay).`,
+    });
+  }
+
+  if (e.invoice_date) {
+    const valid = isRealCalendarDate(e.invoice_date);
+    if (!valid) {
+      issues.push({
+        field: "invoice_date",
+        reason: `La fecha leída (${e.invoice_date}) no es válida.`,
+        retryHint: `La fecha "${e.invoice_date}" no es una fecha válida en formato YYYY-MM-DD.`,
+      });
+    } else if (Date.parse(`${e.invoice_date}T00:00:00Z`) - now.getTime() > MAX_FUTURE_DAYS * 86_400_000) {
+      issues.push({
+        field: "invoice_date",
+        reason: `La fecha leída (${e.invoice_date}) está en el futuro.`,
+        retryHint: `La fecha "${e.invoice_date}" está en el futuro: releé el recuadro de fecha (el vencimiento del CAE suele ser la emisión + 10 días).`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/** YYYY-MM-DD que existe en el calendario (Date.parse acepta "2026-02-30" y lo corre a marzo). */
+function isRealCalendarDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+}

@@ -48,6 +48,7 @@ import type { InvoiceExtraction } from "@/lib/schemas";
 import { isDatabaseConfigured } from "@/lib/database-config";
 import { expireStaleProcessingInvoices } from "@/lib/invoice-processing";
 import {
+  cuitDigitsOnly,
   normalizeArgentineCuitFromAiOrNull,
   validateArgentineCuitForEntry,
 } from "@/lib/cuit-argentina";
@@ -63,7 +64,13 @@ import { convertAiPayloadToArs, scaleAmount } from "@/lib/currency-convert";
 import { loadChartAccountHintsBlock } from "@/lib/chart-account-ai-hints";
 import { resolveChartAccountForExtraction } from "@/lib/chart-account-match";
 import { resolveChartAccountForSupplierCode } from "@/lib/supplier-chart-account";
-import { loadSupplierMaestroCuitHintsBlock } from "@/lib/supplier-ai-hints";
+import {
+  loadSupplierMaestroCuitHintsBlock,
+  loadSupplierMaestroForCuitMatch,
+} from "@/lib/supplier-ai-hints";
+import { extractInvoiceV2, type ExtractionV2Options } from "@/lib/extraction-v2/pipeline";
+import type { ExtractionReview } from "@/lib/extraction-v2/review";
+import { amountsAsRead } from "@/lib/extraction-v2/amounts-as-read";
 import { pickSupplierByCode, resolveOrCreateInvoiceSupplier } from "@/lib/resolve-invoice-supplier";
 import { runOcr } from "@/lib/ocr";
 import { rasterizePdfPagesPng } from "@/lib/pdf-raster";
@@ -217,19 +224,65 @@ type UploadedPart = {
   publicUrl: string;
 };
 
-async function extractFromParts(
-  parts: UploadedPart[],
-  extractOpts: {
-    maestroCuitHintsBlock: string | null;
-    chartAccountHintsBlock: string | null;
-  },
-): Promise<{
+type ExtractOpts = ExtractionV2Options;
+
+type ExtractFromPartsResult = {
   extracted: InvoiceExtraction;
   rawOcrText: string | null;
   visionImages?: { buffer: Buffer; mimeType: "image/jpeg" | "image/png" }[];
   amountsSupplement?: AmountsSupplement | null;
   discountSupplement?: DiscountSupplement | null;
-}> {
+  review?: ExtractionReview;
+};
+
+async function loadExtractOpts(userId: string): Promise<ExtractOpts> {
+  const [maestroCuitHintsBlock, chartAccountHintsBlock, maestro] = await Promise.all([
+    loadSupplierMaestroCuitHintsBlock(userId),
+    loadChartAccountHintsBlock(userId),
+    loadSupplierMaestroForCuitMatch(userId),
+  ]);
+  return { maestroCuitHintsBlock, chartAccountHintsBlock, maestro };
+}
+
+/**
+ * Pipeline v2 (src/lib/extraction-v2, pensado para GPT-6 Luna) por defecto.
+ * EXTRACTION_PIPELINE=legacy vuelve al pipeline de varias pasadas pensado para gpt-4o.
+ */
+async function extractFromParts(
+  parts: UploadedPart[],
+  extractOpts: ExtractOpts,
+): Promise<ExtractFromPartsResult> {
+  if (process.env.EXTRACTION_PIPELINE?.trim().toLowerCase() === "legacy") {
+    return extractFromPartsLegacy(parts, extractOpts);
+  }
+  const result = await extractInvoiceV2(parts, extractOpts);
+  // Las bonificaciones globales (p. ej. Jeluz) siguen con su pasada focalizada: Luna sola no
+  // las itemiza de forma confiable. Solo corre si hay indicios de bonificación.
+  const wantDiscount = hasAnyDiscountSignal({
+    extracted: result.extracted,
+    rawOcrText: result.rawOcrText,
+  });
+  const discountSupplement =
+    wantDiscount && result.visionImages.length > 0
+      ? await fetchDiscountSupplementCropped(result.visionImages, {
+          rawOcrText: result.rawOcrText,
+          providerName: result.extracted.provider,
+          discountLines: result.extracted.discount_lines,
+        })
+      : null;
+  // Sin visionImages: finalizeExtractedAmounts solo reconcilia (no dispara pasadas de visión).
+  return {
+    extracted: result.extracted,
+    rawOcrText: result.rawOcrText,
+    discountSupplement,
+    review: result.review,
+  };
+}
+
+async function extractFromPartsLegacy(
+  parts: UploadedPart[],
+  extractOpts: ExtractOpts,
+): Promise<ExtractFromPartsResult> {
   const pdfTexts: { partNum: number; text: string; weak: boolean }[] = [];
   const allPdf = parts.every((p) => p.mimeType === "application/pdf");
 
@@ -323,6 +376,7 @@ async function applyExtractionToInvoice(
   options?: {
     preserveMovementId?: string | null;
     resetDestinationUpload?: boolean;
+    review?: ExtractionReview;
   },
 ): Promise<void> {
   const prior = await prisma.invoice.findFirst({
@@ -330,13 +384,32 @@ async function applyExtractionToInvoice(
     select: { empresa: true, sucursal: true },
   });
 
+  // CUIT exacto (QR/ITF de ARCA) o corregido con el maestro: manda sobre el match por nombre.
+  const cuitIsVerified = Boolean(
+    options?.review?.verifiedFields?.includes("cuit") || options?.review?.cuitCorrection,
+  );
   const resolved = await resolveOrCreateInvoiceSupplier(
     userId,
     extracted.provider,
     extracted.cuit,
+    options?.review ? { cuitIsVerified, onlyTrustworthyCuitForNewSupplier: true } : {},
   );
   const aiCuit = normalizeArgentineCuitFromAiOrNull(extracted.cuit);
-  const providerCuit = resolved?.cuit ?? aiCuit;
+  const providerCuit = cuitIsVerified ? (aiCuit ?? resolved?.cuit ?? null) : (resolved?.cuit ?? aiCuit);
+  // Si el match por nombre terminó usando otro CUIT que el leído, el motivo de "Revisar" tiene que
+  // hablar del CUIT que se guarda (la marca se mantiene: el match por nombre no es verificación).
+  const review =
+    options?.review && providerCuit && cuitDigitsOnly(providerCuit) !== cuitDigitsOnly(aiCuit)
+      ? {
+          ...options.review,
+          fields: {
+            ...options.review.fields,
+            cuit: aiCuit
+              ? `Se usó el CUIT ${providerCuit} de tu maestro (proveedor encontrado por nombre); el leído era ${aiCuit}: confirmalo.`
+              : `No se leyó el CUIT: se usó ${providerCuit} de tu maestro (proveedor encontrado por nombre): confirmalo.`,
+          },
+        }
+      : options?.review;
   const supplierCode = resolved?.code ?? null;
 
   let empresaOut = prior?.empresa ?? null;
@@ -363,9 +436,14 @@ async function applyExtractionToInvoice(
   const fiscalAuthType = doc.fiscalAuthType;
   const fiscalAuthCode = doc.fiscalAuthCode;
 
-  const finalized = await finalizeExtractedAmounts(extracted, visionImages, {
-    precomputedSupplement: amountsSupplement,
-  });
+  // v2: importes tal como se leyeron (con el QR aplicado). La reconciliación algebraica legacy
+  // despejaba percepciones para cerrar la suma y ocultaba desgloses mal leídos (ver
+  // amounts-as-read.ts); en v2 lo que no cierra queda marcado para revisar.
+  const finalized = options?.review
+    ? amountsAsRead(extracted)
+    : await finalizeExtractedAmounts(extracted, visionImages, {
+        precomputedSupplement: amountsSupplement,
+      });
   const { extracted: resolvedExtracted, debug: discountResolution } =
     enrichExtractedDiscounts(finalized.extracted, {
       rawOcrText,
@@ -388,6 +466,11 @@ async function applyExtractionToInvoice(
     aiPayloadOut.discount_resolution = discountResolution;
   }
   aiPayloadOut.amounts_reconciled = finalized.amountsReconciled;
+  if (options?.review) {
+    // Los importes no cambian después del pipeline v2: sus motivos (incluido QR vs. impreso)
+    // quedan tal cual.
+    aiPayloadOut.review = review;
+  }
   if (finalized.amountsDiscrepancy != null) {
     aiPayloadOut.amounts_discrepancy = finalized.amountsDiscrepancy;
   }
@@ -463,10 +546,7 @@ async function processInvoiceGroup(
   files: File[],
   buffers: Buffer[],
   mimeTypes: string[],
-  extractOpts: {
-    maestroCuitHintsBlock: string | null;
-    chartAccountHintsBlock: string | null;
-  },
+  extractOpts: ExtractOpts,
 ): Promise<string> {
   const uploadedParts: UploadedPart[] = [];
   for (const idx of indices) {
@@ -505,7 +585,7 @@ async function processInvoiceGroup(
   });
 
   try {
-    const { extracted, rawOcrText, visionImages, amountsSupplement, discountSupplement } =
+    const { extracted, rawOcrText, visionImages, amountsSupplement, discountSupplement, review } =
       await extractFromParts(uploadedParts, extractOpts);
     await applyExtractionToInvoice(
       invoice.id,
@@ -515,6 +595,7 @@ async function processInvoiceGroup(
       visionImages,
       amountsSupplement,
       discountSupplement,
+      { review },
     );
     revalidatePath(`/history/${invoice.id}`);
     return invoice.id;
@@ -686,11 +767,7 @@ export async function uploadInvoiceBatch(
     typeof clientBatchId === "string" && UUID_RE.test(clientBatchId)
       ? clientBatchId
       : randomUUID();
-  const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
-    loadSupplierMaestroCuitHintsBlock(userId),
-    loadChartAccountHintsBlock(userId),
-  ]);
-  const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
+  const extractOpts = await loadExtractOpts(userId);
 
   const invoiceIds = await mapWithConcurrency(
     groups,
@@ -1479,11 +1556,7 @@ export async function reprocessInvoice(
       });
     }
 
-    const [maestroCuitHintsBlock, chartAccountHintsBlock] = await Promise.all([
-      loadSupplierMaestroCuitHintsBlock(userId),
-      loadChartAccountHintsBlock(userId),
-    ]);
-    const extractOpts = { maestroCuitHintsBlock, chartAccountHintsBlock };
+    const extractOpts = await loadExtractOpts(userId);
 
     const {
       extracted,
@@ -1491,6 +1564,7 @@ export async function reprocessInvoice(
       visionImages,
       amountsSupplement,
       discountSupplement,
+      review,
     } = await extractFromParts(uploadedParts, extractOpts);
 
     await applyExtractionToInvoice(
@@ -1504,6 +1578,7 @@ export async function reprocessInvoice(
       {
         preserveMovementId: existing.movementId,
         resetDestinationUpload: true,
+        review,
       },
     );
 

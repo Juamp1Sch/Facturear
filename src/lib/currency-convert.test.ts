@@ -39,6 +39,12 @@ describe("convertAiPayloadToArs", () => {
     assert.equal(out.provider, "ACME");
   });
 
+  it("también escala otros tributos (impuestos internos, ITC) de la extracción v2", () => {
+    const out = convertAiPayloadToArs({ net_amount: 100, other_taxes_amount: 10, total_amount: 110 }, 1000) as Record<string, unknown>;
+    assert.equal(out.other_taxes_amount, 10000);
+    assert.equal(out.total_amount, 110000);
+  });
+
   it("tolera payloads nulos o sin importes", () => {
     assert.equal(convertAiPayloadToArs(null, 1460), null);
     assert.deepEqual(convertAiPayloadToArs({ foo: "bar" }, 1460), { foo: "bar" });

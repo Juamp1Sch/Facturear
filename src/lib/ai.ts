@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 
 import { acceptFiscalAuthSupplement } from "@/lib/document-class";
+import { invoiceExtractionSchemaV2, type InvoiceExtractionV2 } from "@/lib/extraction-v2/prompt";
 import { withOpenAIRetry } from "@/lib/openai-retry";
 import {
   invoiceExtractionSchema,
@@ -79,12 +80,12 @@ function getOpenAI() {
 
 function getOpenAIModel(): string {
   // `||` y no `??`: una variable definida pero vacía no debe mandar model "" (400).
-  return process.env.OPENAI_MODEL?.trim() || "gpt-4o";
+  return process.env.OPENAI_MODEL?.trim() || "gpt-6-luna";
 }
 
 const EXTRACTION_TEMPERATURE = 0;
 
-type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high";
 
 /** GPT-5.x / GPT-6 y la serie o* rechazan `temperature` (HTTP 400) y usan `reasoning_effort`. */
 function isReasoningModel(model: string): boolean {
@@ -97,15 +98,35 @@ function getReasoningEffort(): ReasoningEffort {
 }
 
 /** Modelo + parámetros de muestreo compatibles con el modelo configurado. */
-function modelParams(): {
+function modelParams(effort?: ReasoningEffort): {
   model: string;
   temperature?: number;
   reasoning_effort?: ReasoningEffort;
 } {
   const model = getOpenAIModel();
   return isReasoningModel(model)
-    ? { model, reasoning_effort: getReasoningEffort() }
+    ? { model, reasoning_effort: effort ?? getReasoningEffort() }
     : { model, temperature: EXTRACTION_TEMPERATURE };
+}
+
+/**
+ * `detail` de imagen según el modelo: los modelos nuevos (GPT-5.x/6) aceptan "original", que
+ * no reduce la imagen (recomendado por OpenAI para OCR); gpt-4o solo acepta hasta "high".
+ */
+export function imageDetailForCurrentModel(): "original" | "high" {
+  // Solo donde se probó (GPT-5.x/6); la serie o* y gpt-4o van con "high".
+  return /^(gpt-5|gpt-6)/i.test(getOpenAIModel()) ? "original" : "high";
+}
+
+/** Nombre del modelo configurado (para logs/diagnóstico del pipeline). */
+export function currentOpenAIModel(): string {
+  return getOpenAIModel();
+}
+
+/** OPENAI_REASONING_EFFORT si está definido explícitamente (null = usar el default del caller). */
+export function configuredReasoningEffort(): ReasoningEffort | null {
+  const raw = process.env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
+  return raw === "low" || raw === "medium" || raw === "high" ? raw : null;
 }
 
 /** Deja en los logs el consumo real de tokens por pasada (para medir costo por factura). */
@@ -428,4 +449,49 @@ export async function supplementDiscountFromImages(
   logUsage("discount", completion);
 
   return completion.choices[0]?.message?.parsed ?? null;
+}
+
+/**
+ * Tope por llamada: el default del SDK es 10 min, y una llamada colgada (medido: pasa) dejaba la
+ * factura esperando ~10 min antes del reintento. Una lectura normal tarda 5-40 s; el SDK
+ * reintenta una sola vez al vencer el tope (peor caso ~4 min por llamada, no ~30).
+ */
+const V2_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Extracción v2 (src/lib/extraction-v2): una llamada con el prompt y el contenido armados por
+ * el pipeline (texto del PDF o del OCR, páginas y ampliaciones). `followUp` se usa en la 2da
+ * pasada para indicar qué validaciones fallaron.
+ */
+export async function extractInvoiceDataV2(params: {
+  systemPrompt: string;
+  content: OpenAI.Chat.Completions.ChatCompletionContentPart[];
+  reasoningEffort?: ReasoningEffort;
+  followUp?: string;
+  pass: string;
+}): Promise<InvoiceExtractionV2> {
+  const openai = getOpenAI();
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: params.systemPrompt },
+    { role: "user", content: params.content },
+  ];
+  if (params.followUp) messages.push({ role: "user", content: params.followUp });
+
+  const completion = await withOpenAIRetry(() =>
+    openai.beta.chat.completions.parse(
+      {
+        ...modelParams(params.reasoningEffort),
+        messages,
+        response_format: zodResponseFormat(invoiceExtractionSchemaV2, "invoice_extraction"),
+      },
+      { timeout: V2_REQUEST_TIMEOUT_MS, maxRetries: 1 },
+    ),
+  );
+  logUsage(params.pass, completion);
+
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed) {
+    throw new Error("OpenAI no devolvió datos parseables.");
+  }
+  return parsed;
 }

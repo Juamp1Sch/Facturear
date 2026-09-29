@@ -111,15 +111,25 @@ export type MaestroSupplierRow = {
   cuit: string | null;
 };
 
+export type SupplierMatchOptions = {
+  /**
+   * El CUIT es exacto (QR/código de barras de ARCA o corregido con el maestro): gana sobre el
+   * nombre, y un match por nombre solo vale si ese proveedor no tiene CUIT o tiene el mismo.
+   */
+  cuitIsVerified?: boolean;
+};
+
 /**
  * Misma regla que al procesar la factura: CUIT igual al leído, o nombre del maestro como prefijo
- * del emisor en la factura. Si CUIT y nombre apuntan a distintos códigos, prevalece el match por nombre.
+ * del emisor en la factura. Si CUIT y nombre apuntan a distintos códigos, prevalece el match por
+ * nombre (CUIT de OCR), salvo con `cuitIsVerified`, donde manda el CUIT.
  * Para documentos sin CUIT (presupuestos) cae a un match tolerante a abreviaturas.
  */
 export function matchSupplierFromList(
   suppliers: ReadonlyArray<MaestroSupplierRow>,
   invoiceProviderName: string | null | undefined,
   extractedCuitRaw: string | null | undefined,
+  options: SupplierMatchOptions = {},
 ): MaestroSupplierPick | null {
   if (suppliers.length === 0) return null;
 
@@ -140,9 +150,14 @@ export function matchSupplierFromList(
     }
   }
 
+  const cuitIsVerified = Boolean(options.cuitIsVerified && aiDigits?.length === 11);
+  const compatibleWithVerifiedCuit = (rowCuit: string | null) =>
+    !cuitIsVerified || !rowCuit || cuitDigitsOnly(rowCuit) === aiDigits;
+
   let byName: (MaestroSupplierPick & { prefixLen: number }) | null = null;
   if (invoiceNameC.length > 0) {
     for (const s of suppliers) {
+      if (!compatibleWithVerifiedCuit(s.cuit)) continue;
       const masterC = compactCompanyName(s.name);
       if (masterC.length < MIN_NAME_PREFIX_LEN) continue;
       if (invoiceNameC.startsWith(masterC)) {
@@ -155,7 +170,8 @@ export function matchSupplierFromList(
 
   let chosen: MaestroSupplierPick | null = null;
   if (byCuit && byName && byCuit.code !== byName.code) {
-    chosen = { code: byName.code, cuit: byName.cuit };
+    // Con CUIT de OCR el nombre es más confiable; con CUIT verificado, manda el CUIT.
+    chosen = cuitIsVerified ? byCuit : { code: byName.code, cuit: byName.cuit };
   } else if (byCuit) {
     chosen = byCuit;
   } else if (byName) {
@@ -166,6 +182,7 @@ export function matchSupplierFromList(
   // Fallback tolerante a abreviaturas (sobre todo para presupuestos sin CUIT).
   let bestTolerant: (MaestroSupplierPick & { score: number }) | null = null;
   for (const s of suppliers) {
+    if (!compatibleWithVerifiedCuit(s.cuit)) continue;
     const score = tolerantNameScore(invoiceProviderName, s.name);
     if (score < TOLERANT_NAME_MIN_SCORE) continue;
     if (!bestTolerant || score > bestTolerant.score) {
@@ -181,10 +198,11 @@ export async function resolveSupplierFromMaestro(
   userId: string,
   invoiceProviderName: string | null | undefined,
   extractedCuitRaw: string | null | undefined,
+  options: SupplierMatchOptions = {},
 ): Promise<MaestroSupplierPick | null> {
   const suppliers = await prisma.supplier.findMany({
     where: { userId },
     select: { code: true, name: true, cuit: true },
   });
-  return matchSupplierFromList(suppliers, invoiceProviderName, extractedCuitRaw);
+  return matchSupplierFromList(suppliers, invoiceProviderName, extractedCuitRaw, options);
 }
