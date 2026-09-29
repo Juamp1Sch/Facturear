@@ -228,6 +228,12 @@ export function UploadForm({
 
   const groups = useMemo(() => buildGroups(items), [items]);
   const invoiceCount = groups.length;
+  /** Número de factura de cada archivo (una continuación comparte el de la anterior). */
+  const invoiceNumberByIndex = useMemo(() => {
+    const byIndex: number[] = [];
+    groups.forEach((group, g) => group.forEach((idx) => (byIndex[idx] = g + 1)));
+    return byIndex;
+  }, [groups]);
 
   const onDrop = useCallback((accepted: File[]) => {
     setItems((prev) => {
@@ -353,17 +359,6 @@ export function UploadForm({
     return `Parte ${part}`;
   };
 
-  const getInvoiceNumber = (index: number): number => {
-    let n = 1;
-    for (let i = 0; i <= index; i++) {
-      if (i === 0 || !items[i]?.isContinuation) {
-        if (i === index) return n;
-        n++;
-      }
-    }
-    return n;
-  };
-
   const openPreview = (item: QueueItem, label: string) => {
     setFilePreview({
       url: URL.createObjectURL(item.file),
@@ -463,19 +458,20 @@ export function UploadForm({
                       item.file.type === "application/pdf" ||
                       item.file.name.toLowerCase().endsWith(".pdf");
                     const partLabel = getPartLabel(index);
-                    const invoiceNum = getInvoiceNumber(index);
-                    // Factura a la que pertenece el archivo (una continuación es parte de la anterior).
-                    const groupNum = groups.findIndex((g) => g.includes(index)) + 1;
-                    const label = item.isContinuation
-                      ? `Factura ${groupNum} · ${partLabel ?? "Continuación"}`
-                      : `Factura ${groupNum}`;
+                    const invoiceNum = invoiceNumberByIndex[index] ?? index + 1;
+                    // El primer archivo siempre abre una factura (así agrupa buildGroups), aunque
+                    // haya quedado marcado como continuación al reordenar.
+                    const isContinuation = index > 0 && item.isContinuation;
+                    const label = isContinuation
+                      ? `Factura ${invoiceNum} · ${partLabel ?? "Continuación"}`
+                      : `Factura ${invoiceNum}`;
 
                     return (
                       <li
                         key={item.id}
                         className={cn(
                           "flex gap-3 rounded-lg border border-border p-3",
-                          item.isContinuation && "border-primary/30 bg-muted/20",
+                          isContinuation && "border-primary/30 bg-muted/20",
                         )}
                       >
                         <button
@@ -511,7 +507,7 @@ export function UploadForm({
                             <span className="text-xs text-muted-foreground">
                               {formatBytes(item.file.size)}
                             </span>
-                            {!item.isContinuation ? (
+                            {!isContinuation ? (
                               <Badge variant="secondary">
                                 Factura {invoiceNum}
                               </Badge>
