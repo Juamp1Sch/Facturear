@@ -185,6 +185,13 @@ export function UploadBatchResultsView({
         {invoices.length !== 1 ? "s" : ""})
       </h2>
 
+      {/* Arriba de la factura: se pagina sin scrollear hasta el final del resultado. */}
+      <InvoicePagination
+        current={invoiceIndex}
+        total={invoices.length}
+        onChange={setInvoiceIndex}
+      />
+
       <div className="flex flex-wrap items-center gap-3">
         <Badge
           variant={invoice.status === "ERROR" ? "destructive" : "secondary"}
@@ -231,12 +238,6 @@ export function UploadBatchResultsView({
           ignoreBonificaciones={taxChartAccounts.ignoreBonificaciones}
         />
       </div>
-
-      <InvoicePagination
-        current={invoiceIndex}
-        total={invoices.length}
-        onChange={setInvoiceIndex}
-      />
 
       <Card>
         <CardHeader>
