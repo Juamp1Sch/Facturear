@@ -185,7 +185,6 @@ export function UploadBatchResultsView({
         {invoices.length !== 1 ? "s" : ""})
       </h2>
 
-      {/* Arriba de la factura: se pagina sin scrollear hasta el final del resultado. */}
       <InvoicePagination
         current={invoiceIndex}
         total={invoices.length}
@@ -222,11 +221,13 @@ export function UploadBatchResultsView({
             </CardDescription>
           </CardHeader>
           <CardContent className="min-h-[320px] p-3 sm:p-6">
-            <InvoiceDocumentPreview parts={parts} />
+            <InvoiceDocumentPreview key={invoice.id} parts={parts} />
           </CardContent>
         </Card>
 
+        {/* key: al paginar, la edición (y sus borradores) no pasa a la otra factura. */}
         <InvoiceExtractedFields
+          key={invoice.id}
           invoice={invoice}
           presupuestoLetra={presupuestoLetra}
           presupuestoEmpresa={presupuestoEmpresa}
