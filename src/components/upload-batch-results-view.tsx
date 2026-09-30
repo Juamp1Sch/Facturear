@@ -185,6 +185,12 @@ export function UploadBatchResultsView({
         {invoices.length !== 1 ? "s" : ""})
       </h2>
 
+      <InvoicePagination
+        current={invoiceIndex}
+        total={invoices.length}
+        onChange={setInvoiceIndex}
+      />
+
       <div className="flex flex-wrap items-center gap-3">
         <Badge
           variant={invoice.status === "ERROR" ? "destructive" : "secondary"}
@@ -215,11 +221,13 @@ export function UploadBatchResultsView({
             </CardDescription>
           </CardHeader>
           <CardContent className="min-h-[320px] p-3 sm:p-6">
-            <InvoiceDocumentPreview parts={parts} />
+            <InvoiceDocumentPreview key={invoice.id} parts={parts} />
           </CardContent>
         </Card>
 
+        {/* key: al paginar, la edición (y sus borradores) no pasa a la otra factura. */}
         <InvoiceExtractedFields
+          key={invoice.id}
           invoice={invoice}
           presupuestoLetra={presupuestoLetra}
           presupuestoEmpresa={presupuestoEmpresa}
@@ -231,12 +239,6 @@ export function UploadBatchResultsView({
           ignoreBonificaciones={taxChartAccounts.ignoreBonificaciones}
         />
       </div>
-
-      <InvoicePagination
-        current={invoiceIndex}
-        total={invoices.length}
-        onChange={setInvoiceIndex}
-      />
 
       <Card>
         <CardHeader>
